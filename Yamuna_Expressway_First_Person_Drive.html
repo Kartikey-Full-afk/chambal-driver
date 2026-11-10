@@ -1,0 +1,2428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Yamuna Expressway FPP Drive — Real Cockpit & Bass Loop Simulator</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Three.js WebGL Engine -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700;800&family=Orbitron:wght@600;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #060911;
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Main Viewport Container */
+    #simulatorStage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #05070b;
+    }
+
+    /* 3D Highway Canvas (Three.js) */
+    #highwayCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      z-index: 1;
+    }
+
+    /* High-Beam Flash & Speed Camera Flash Overlay */
+    #lightFlashOverlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      opacity: 0;
+      transition: opacity 0.08s ease-out;
+    }
+
+    /* FPP Cockpit Wrapper — Framed for driver eye-level (crops empty bottom seat cushions so windshield is larger) */
+    #cockpitRig {
+      position: absolute;
+      left: -2.5%;
+      top: -1.0%;
+      width: 105%;
+      height: 118%;
+      z-index: 10;
+      pointer-events: none;
+      transform-origin: 71.75% 48%;
+      will-change: transform;
+      transition: top 0.25s ease, height 0.25s ease, left 0.25s ease, width 0.25s ease;
+    }
+
+    /* Composite Cockpit Canvas (Masks Original-6854-su-13.webp + dynamic RHD instruments) */
+    #cockpitCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      pointer-events: none;
+    }
+
+    /* Interactive Infotainment Touchscreen Overlay aligned to Original-6854-su-13.webp screen bezel */
+    #infotainmentScreen {
+      position: absolute;
+      left: 42.15%;
+      top: 28.0%;
+      width: 11.75%;
+      height: 11.7%;
+      z-index: 18;
+      pointer-events: auto;
+      background: linear-gradient(145deg, #0b111e 0%, #070a12 100%);
+      border-radius: 6px;
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.9), 0 0 15px rgba(14, 165, 233, 0.15);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 0.35vw;
+      font-size: clamp(7px, 0.58vw, 12px);
+      color: #e2e8f0;
+    }
+
+    /* Rear-View Mirror Live Reflection Canvas aligned to Original-6854-su-13.webp top mirror */
+    #rearMirrorWrapper {
+      position: absolute;
+      left: 42.65%;
+      top: 0.35%;
+      width: 14.85%;
+      height: 4.85%;
+      z-index: 16;
+      border-radius: 5px 5px 9px 9px;
+      overflow: hidden;
+      border: 2px solid #16181d;
+      box-shadow: inset 0 0 10px rgba(0,0,0,0.85), 0 3px 10px rgba(0,0,0,0.6);
+      background: #0d131a;
+      pointer-events: none;
+    }
+    #rearMirrorCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      transform: scaleX(-1); /* Mirror reflection */
+    }
+
+    /* Digital Speedometer / MID Cluster behind RHD Steering Wheel */
+    #instrumentClusterMID {
+      position: absolute;
+      left: 65.0%;
+      top: 34.4%;
+      width: 13.4%;
+      height: 11.0%;
+      z-index: 12;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      color: #f8fafc;
+      font-family: 'Orbitron', sans-serif;
+      text-shadow: 0 0 8px rgba(56, 189, 248, 0.65);
+    }
+
+    /* Interactive Steering Wheel Grab Zone */
+    #steeringTouchZone {
+      position: absolute;
+      left: 58.5%;
+      top: 26.5%;
+      width: 26.5%;
+      height: 48.0%;
+      z-index: 22;
+      border-radius: 50%;
+      cursor: grab;
+      pointer-events: auto;
+    }
+    #steeringTouchZone:active {
+      cursor: grabbing;
+    }
+
+    /* Glassmorphic HUD Top Bar */
+    .hud-glass {
+      background: rgba(10, 15, 28, 0.78);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    }
+
+    /* Custom Scrollbar & Range Input */
+    input[type="range"] {
+      accent-color: #f59e0b;
+    }
+
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+      50% { box-shadow: 0 0 20px 4px rgba(245, 158, 11, 0.35); }
+    }
+    .btn-glow {
+      animation: pulseGlow 2.2s infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hidden Looping Audio Element for Car Music -->
+  <audio id="carSongPlayer" loop preload="auto" crossorigin="anonymous">
+    <!-- Primary uploaded Haryanvi Bass Boosted track on repeat -->
+    <source src="80 Lakh (BASS BOOSTED) Kala Dighal, Sweta Chauhan - BLOOMBASS1.mp3" type="audio/mpeg" />
+    <source src="song.mp3" type="audio/mpeg" />
+    <source src="audio.mp3" type="audio/mpeg" />
+    <source src="music.mp3" type="audio/mpeg" />
+  </audio>
+
+  <!-- Hidden File Inputs for Custom Song or Cockpit Image Fallback -->
+  <input type="file" id="songFileInput" accept="audio/*,video/*" class="hidden" />
+  <input type="file" id="cockpitFileInput" accept="image/*" class="hidden" />
+
+  <!-- MAIN SIMULATOR STAGE -->
+  <div id="simulatorStage">
+
+    <!-- 1. Live 3D Yamuna Expressway Canvas -->
+    <canvas id="highwayCanvas"></canvas>
+
+    <!-- 2. High-Beam / Speed Camera Flash Overlay -->
+    <div id="lightFlashOverlay"></div>
+
+    <!-- 3. FPP Cockpit Rig (Uses Original-6854-su-13.webp with masked windows + animated RHD controls) -->
+    <div id="cockpitRig">
+
+      <!-- Live Rear-View Mirror inside the top mirror housing of Original-6854-su-13.webp -->
+      <div id="rearMirrorWrapper">
+        <canvas id="rearMirrorCanvas" width="320" height="90"></canvas>
+        <div class="absolute bottom-0.5 right-1.5 text-[8px] font-mono text-emerald-300/80 tracking-wider">
+          REAR CAM • YEIDA
+        </div>
+      </div>
+
+      <!-- Instrument Cluster MID behind the Right-Hand-Drive Steering Wheel -->
+      <div id="instrumentClusterMID">
+        <div class="flex items-center gap-2 text-[9px] font-mono tracking-widest mb-0.5">
+          <span id="leftTurnLamp" class="text-slate-600 transition-colors">◀</span>
+          <span id="highBeamLamp" class="text-slate-600 transition-colors font-bold">≡D</span>
+          <span id="gearBadgeMID" class="px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-400/50 text-amber-300 font-bold">D3</span>
+          <span id="rightTurnLamp" class="text-slate-600 transition-colors">▶</span>
+        </div>
+        <div class="flex items-baseline gap-1">
+          <span id="speedDigitsMID" class="text-lg sm:text-xl md:text-2xl font-black text-cyan-300 leading-none">0</span>
+          <span class="text-[8px] text-slate-400 font-mono">KM/H</span>
+        </div>
+        <div class="w-3/4 h-1.5 bg-slate-800/90 rounded-full overflow-hidden mt-1 border border-slate-700/60">
+          <div id="rpmBarMID" class="h-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-75" style="width: 12%;"></div>
+        </div>
+      </div>
+
+      <!-- Main Composite Cockpit Canvas (renders Original-6854-su-13.webp + rotating wheel + shifter + pedals) -->
+      <canvas id="cockpitCanvas"></canvas>
+
+      <!-- Interactive Center Infotainment Touchscreen (aligned to Original-6854-su-13.webp screen) -->
+      <div id="infotainmentScreen">
+        <!-- Top Status Bar -->
+        <div class="flex items-center justify-between border-b border-slate-700/70 pb-0.5 text-[0.82em] font-mono text-slate-300">
+          <span class="flex items-center gap-1 text-emerald-400 font-bold">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+            YEIDA GPS
+          </span>
+          <span id="screenClock">14:00</span>
+          <span class="text-amber-400 font-bold">LOOP 🔁</span>
+        </div>
+
+        <!-- Middle Split: Route Map + Live Bass Visualizer -->
+        <div class="grid grid-cols-2 gap-1 my-auto py-0.5 flex-1 items-center">
+          <!-- Left: Yamuna Expressway Live Progress -->
+          <div class="bg-slate-900/90 rounded p-1 border border-slate-800 h-full flex flex-col justify-between">
+            <div class="text-[0.75em] text-cyan-300 font-semibold truncate" id="nextMilestoneText">
+              ↗ JEWAR TOLL
+            </div>
+            <div class="w-full bg-slate-800 h-1 rounded-full overflow-hidden my-0.5">
+              <div id="routeProgressBar" class="bg-emerald-400 h-full transition-all" style="width: 8%;"></div>
+            </div>
+            <div class="flex justify-between text-[0.7em] font-mono text-slate-400">
+              <span id="odoText">12.4 KM</span>
+              <span class="text-amber-300">AGRA 153</span>
+            </div>
+          </div>
+
+          <!-- Right: Car Music Bass Visualizer -->
+          <div class="bg-slate-900/90 rounded p-1 border border-slate-800 h-full flex flex-col justify-between">
+            <div class="text-[0.72em] text-amber-300 font-bold truncate" id="trackTitleScreen">
+              🎵 80 LAKH (BASS BOOSTED)
+            </div>
+            <canvas id="miniVisualizerCanvas" width="90" height="26" class="w-full h-4 rounded bg-black/50"></canvas>
+            <div class="flex justify-between items-center text-[0.68em]">
+              <button id="screenMuteBtn" class="px-1 bg-slate-800 hover:bg-slate-700 rounded text-cyan-300 pointer-events-auto">
+                VOL
+              </button>
+              <button id="screenBassBtn" class="px-1 bg-amber-500/20 border border-amber-500/50 rounded text-amber-300 font-bold pointer-events-auto">
+                BASS+
+              </button>
+              <button id="screenLoadSongBtn" class="px-1 bg-emerald-500/20 border border-emerald-500/40 rounded text-emerald-300 pointer-events-auto" title="Load Local Song">
+                MP3
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Infotainment Soft Keys -->
+        <div class="flex items-center justify-around pt-0.5 border-t border-slate-800 text-[0.72em] text-slate-400 font-mono">
+          <span>LIMIT: 100</span>
+          <span id="screenGearMode" class="text-cyan-400 cursor-pointer pointer-events-auto">MODE: AUTO</span>
+          <span id="screenTimeMode" class="text-amber-300 cursor-pointer pointer-events-auto">☀ DAY</span>
+        </div>
+      </div>
+
+      <!-- Interactive Drag-to-Steer Zone over the RHD Steering Wheel -->
+      <div id="steeringTouchZone" title="Drag left/right to steer or use A/D / Arrow Keys"></div>
+    </div>
+
+    <!-- 4. TOP COMPACT HUD BAR (Highway Telemetry, Audio Controls & Quick Switches) -->
+    <div class="absolute top-2.5 left-2.5 right-2.5 z-30 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+      
+      <!-- Left: Yamuna Expressway Highway Telemetry -->
+      <div class="hud-glass rounded-xl px-3 py-1.5 flex items-center gap-3 pointer-events-auto">
+        <div class="flex items-center gap-2">
+          <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]"></div>
+          <div>
+            <div class="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold">
+              YAMUNA EXPRESSWAY • 6-LANE ACCESS CONTROLLED
+            </div>
+            <div class="text-xs font-bold text-white flex items-center gap-2">
+              <span id="hudLocationLabel">Greater Noida → Jewar Airport Sec</span>
+              <span class="text-slate-400 font-mono text-[11px]" id="hudDistanceRemaining">(Agra: 153.1 km)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="h-7 w-px bg-slate-700/80 hidden sm:block"></div>
+
+        <!-- Live Speed & Limit Badge -->
+        <div class="hidden sm:flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full bg-white text-slate-950 border-[3px] border-rose-600 flex items-center justify-center font-extrabold text-xs font-mono shadow">
+            100
+          </div>
+          <div>
+            <div class="text-[10px] font-mono text-slate-400">SPEED / GEAR</div>
+            <div class="text-xs font-mono font-bold text-cyan-300">
+              <span id="hudSpeedText">0</span> km/h • <span id="hudGearText" class="text-amber-400">N</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="h-7 w-px bg-slate-700/80 hidden md:block"></div>
+
+        <!-- Interactive Seat Height / Road Horizon Pitch Control -->
+        <div class="hidden md:flex items-center gap-2 bg-slate-900/90 border border-cyan-500/30 rounded-lg px-2.5 py-1">
+          <div class="text-[10px] font-mono leading-tight">
+            <div class="text-cyan-300 font-bold">👀 SEAT / ROAD VIEW</div>
+            <div class="text-slate-400 text-[9px]" id="camModeLabel">FPP Cockpit (1/2/3)</div>
+          </div>
+          <input
+            id="seatPitchSlider"
+            type="range"
+            min="-15"
+            max="25"
+            value="8"
+            step="1"
+            class="w-20 h-1.5 cursor-pointer"
+            title="Adjust driver eye height & road horizon in windshield"
+          />
+          <button
+            id="btnCycleCam"
+            class="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/35 text-[10px] font-mono font-bold text-cyan-200 border border-cyan-400/40 transition"
+            title="Switch Camera View (1: Cockpit, 2: Dash Close, 3: Bonnet Cam)"
+          >
+            🎥 VIEW (C)
+          </button>
+        </div>
+      </div>
+
+      <!-- Right: Looping Car Music & Cockpit Controls -->
+      <div class="hud-glass rounded-xl px-3 py-1.5 flex flex-wrap items-center gap-2 pointer-events-auto">
+        <!-- Music Loop Status & Visualizer Pill -->
+        <div class="flex items-center gap-2 bg-slate-900/90 border border-amber-500/30 rounded-lg px-2.5 py-1">
+          <span class="text-xs" id="musicStatusIcon">🔊</span>
+          <div class="text-[11px] leading-tight">
+            <div class="font-bold text-amber-300 flex items-center gap-1">
+              <span id="hudSongName" class="max-w-[140px] truncate">80 Lakh (BASS BOOSTED)</span>
+              <span class="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded border border-amber-400/30">REPEAT</span>
+            </div>
+            <div class="text-[9px] text-slate-400 font-mono" id="audioEngineSubtitle">Sub-Bass Cabin Synth + MP3 Loop</div>
+          </div>
+        </div>
+
+        <!-- Music Play/Mute -->
+        <button id="btnToggleMusic" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-600/60 transition">
+          Mute (M)
+        </button>
+
+        <!-- Sub-Bass Boost Toggle -->
+        <button id="btnBassBoost" class="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-300 border border-amber-400/50 transition">
+          🔥 Bass Boost: ON (B)
+        </button>
+
+        <!-- Custom Song File Picker -->
+        <button id="btnPickSong" class="px-2.5 py-1.5 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 text-xs font-semibold text-emerald-300 border border-emerald-400/40 transition" title="Load your MP3/Video song file to loop in the car">
+          🎵 Load Song File
+        </button>
+
+        <!-- Custom Cockpit Image Loader (if running standalone offline) -->
+        <button id="btnPickCockpit" class="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-mono text-slate-300 border border-slate-700 transition" title="Reload or change cockpit image">
+          🖼 Cockpit
+        </button>
+
+        <!-- Day / Sunset / Night Highway Mode -->
+        <button id="btnWeatherMode" class="px-2.5 py-1.5 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-xs font-semibold text-sky-300 border border-sky-400/40 transition">
+          ☀ Day (V)
+        </button>
+      </div>
+    </div>
+
+    <!-- 5. SPEED CAMERA / HIGHWAY ALERT TOAST -->
+    <div id="highwayToast" class="fixed top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none opacity-0 transition-all duration-300 transform -translate-y-2">
+      <div class="hud-glass px-4 py-2 rounded-xl border border-amber-400/60 text-center shadow-2xl">
+        <div id="toastTitle" class="text-xs font-extrabold tracking-wider text-amber-300 uppercase">YEIDA SPEED RADAR</div>
+        <div id="toastBody" class="text-[11px] text-slate-200 font-mono">Speed Limit 100 km/h • Drive Safely</div>
+      </div>
+    </div>
+
+    <!-- 6. BOTTOM INTERACTIVE DRIVING CONTROLS & TOUCH PEDALS -->
+    <div class="absolute bottom-2.5 left-2.5 right-2.5 z-30 flex flex-wrap items-end justify-between gap-2 pointer-events-none">
+      
+      <!-- Left: Touch / Mouse Steering & Horn / Dipper Buttons -->
+      <div class="hud-glass rounded-xl p-2 flex items-center gap-1.5 pointer-events-auto">
+        <button id="btnSteerLeft" class="w-11 h-11 rounded-lg bg-slate-800/90 active:bg-cyan-600 hover:bg-slate-700 text-white font-bold text-lg border border-slate-600/70 flex items-center justify-center shadow">
+          ◀
+        </button>
+        <button id="btnSteerRight" class="w-11 h-11 rounded-lg bg-slate-800/90 active:bg-cyan-600 hover:bg-slate-700 text-white font-bold text-lg border border-slate-600/70 flex items-center justify-center shadow">
+          ▶
+        </button>
+        <div class="h-8 w-px bg-slate-700 mx-1"></div>
+        <button id="btnHorn" class="px-3 h-11 rounded-lg bg-amber-500/20 active:bg-amber-500/50 hover:bg-amber-500/30 text-amber-300 font-bold text-xs border border-amber-400/50 flex flex-col items-center justify-center">
+          <span>📢 HORN</span>
+          <span class="text-[9px] font-mono text-amber-200/70">(H)</span>
+        </button>
+        <button id="btnDipper" class="px-3 h-11 rounded-lg bg-cyan-500/20 active:bg-cyan-500/50 hover:bg-cyan-500/30 text-cyan-300 font-bold text-xs border border-cyan-400/50 flex flex-col items-center justify-center">
+          <span>🔦 DIPPER</span>
+          <span class="text-[9px] font-mono text-cyan-200/70">(L)</span>
+        </button>
+        <button id="btnResetCar" class="px-2.5 h-11 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-600/60 flex flex-col items-center justify-center" title="Re-center in middle lane">
+          <span>🛣 LANE</span>
+          <span class="text-[9px] font-mono text-slate-400">(R)</span>
+        </button>
+      </div>
+
+      <!-- Center: Compact Keyboard Shortcuts Legend -->
+      <div class="hud-glass rounded-xl px-3 py-1.5 hidden lg:flex items-center gap-3 text-[11px] text-slate-300 font-mono pointer-events-auto">
+        <span><b class="text-cyan-300">W/↑</b> Gas</span>
+        <span><b class="text-rose-400">S/↓</b> Brake</span>
+        <span><b class="text-cyan-300">A/D</b> Steer</span>
+        <span><b class="text-amber-300">SPACE</b> Handbrake</span>
+        <span><b class="text-emerald-300">E/Q</b> Shift Gear</span>
+        <span><b class="text-amber-300">H</b> Horn</span>
+        <span><b class="text-sky-300">L</b> High-Beam Pass</span>
+      </div>
+
+      <!-- Right: Interactive Pedals & Gear Shifter Controls -->
+      <div class="hud-glass rounded-xl p-2 flex items-center gap-1.5 pointer-events-auto">
+        <div class="flex flex-col gap-1 mr-1">
+          <button id="btnGearUp" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono font-bold text-emerald-300 border border-slate-600">
+            ▲ GEAR + (E)
+          </button>
+          <button id="btnGearDown" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono font-bold text-amber-300 border border-slate-600">
+            ▼ GEAR - (Q)
+          </button>
+        </div>
+
+        <button id="btnHandbrake" class="px-3 h-12 rounded-lg bg-rose-950/70 active:bg-rose-700 hover:bg-rose-900/80 text-rose-300 font-bold text-xs border border-rose-500/40 flex flex-col items-center justify-center">
+          <span>🛑 P-BRAKE</span>
+          <span class="text-[9px] font-mono">(SPACE)</span>
+        </button>
+
+        <button id="btnBrakePedal" class="w-16 h-12 rounded-lg bg-rose-600/30 active:bg-rose-600/70 hover:bg-rose-600/40 text-rose-200 font-extrabold text-xs border border-rose-400/60 flex flex-col items-center justify-center shadow">
+          <span>BRAKE</span>
+          <span class="text-[9px] font-mono">(S / ↓)</span>
+        </button>
+
+        <button id="btnGasPedal" class="w-20 h-12 rounded-lg bg-emerald-600/35 active:bg-emerald-500/80 hover:bg-emerald-600/50 text-emerald-200 font-extrabold text-xs border border-emerald-400/60 flex flex-col items-center justify-center shadow">
+          <span>ACCEL</span>
+          <span class="text-[9px] font-mono">(W / ↑)</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 7. START ENGINE & AUDIO INITIALIZATION MODAL -->
+    <div id="startModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4">
+      <div class="max-w-lg w-full hud-glass rounded-2xl p-6 border border-cyan-500/30 shadow-2xl text-slate-100">
+        <div class="flex items-center justify-between mb-3">
+          <span class="px-2.5 py-1 rounded-full text-[11px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+            REAL-LIFE YAMUNA EXPRESSWAY (165.5 KM)
+          </span>
+          <span class="text-xs font-mono text-amber-300">RHD SUZUKI COCKPIT • FPP</span>
+        </div>
+
+        <h1 class="text-2xl sm:text-3xl font-black tracking-tight text-white mb-2">
+          Yamuna Expressway FPP Drive
+        </h1>
+        <p class="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4">
+          Experience First-Person driving from <b>Greater Noida to Agra</b> inside the right-hand-drive Suzuki manual cockpit (<code class="text-cyan-300">Original-6854-su-13.webp</code>) with live windshield & side-window masking, rotating steering wheel, 5-speed manual/auto gear stick, rear-view mirror, and continuous <b>looping Haryanvi Bass Car Music</b>.
+        </p>
+
+        <!-- Audio & Cockpit Pre-Flight Box -->
+        <div class="bg-slate-900/90 rounded-xl p-3.5 border border-slate-700/80 mb-5 space-y-2.5 text-xs">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="font-bold text-amber-300">🔊 Looping Car Music ("It's Blue Bass — Raj Chale")</div>
+              <div class="text-[11px] text-slate-400" id="modalSongStatus">
+                Built-in Haryanvi Trap Sub-Bass Loop Ready • Or select your local song file:
+              </div>
+            </div>
+            <button id="modalPickSongBtn" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-300 font-bold shrink-0 transition">
+              📂 Select Song File
+            </button>
+          </div>
+
+          <div class="h-px bg-slate-800"></div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="font-bold text-cyan-300">🚘 FPP Cockpit Image (<code class="text-[11px]">Original-6854-su-13.webp</code>)</div>
+              <div class="text-[11px] text-slate-400" id="modalCockpitStatus">
+                Auto-loading & masking windshield, side windows & steering wheel...
+              </div>
+            </div>
+            <button id="modalPickCockpitBtn" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-semibold shrink-0 transition">
+              🖼 Select Image
+            </button>
+          </div>
+        </div>
+
+        <!-- Primary Launch Button -->
+        <button id="btnStartEngine" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-black text-base tracking-wide uppercase shadow-xl btn-glow transition cursor-pointer">
+          🔑 Start Engine & Play Looping Car Music
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- =========================================================================
+       COMPLETE SIMULATOR ENGINE (3D YAMUNA EXPRESSWAY + RHD COCKPIT MASKING + AUDIO)
+       ========================================================================= -->
+  <script>
+    (function () {
+      'use strict';
+
+      // =======================================================================
+      // 1. SIMULATOR STATE & DRIVING PHYSICS CONFIGURATION
+      // =======================================================================
+      const state = {
+        engineStarted: false,
+        speedKmh: 0,           // Current vehicle speed in km/h (0 to 185 km/h, Reverse up to -35)
+        maxSpeedKmh: 185,
+        distanceKm: 12.4,      // Starts near Dankaur / Jewar approach on Yamuna Expressway
+        totalExpresswayKm: 165.5,
+        laneOffset: -6.5,      // X position on carriageway (-10.5 = Left Lane 1, -6.5 = Middle Lane 2, -2.5 = Fast Right Lane 3)
+        lateralVelocity: 0,
+        steerInput: 0,         // -1 (Left) to +1 (Right)
+        steerAngleDeg: 0,      // Visual steering wheel rotation (-420 deg to +420 deg)
+        throttle: 0,           // 0 to 1
+        brake: 0,              // 0 to 1
+        clutch: 0,             // 0 to 1
+        handbrake: false,
+        gear: 1,               // -1 = R, 0 = N, 1..5 = Forward gears
+        autoTransmission: true,
+        rpm: 850,              // 850 idle to 6800 redline
+        highBeam: false,
+        leftIndicator: false,
+        rightIndicator: false,
+        hornActive: false,
+        timeOfDay: 'day',      // 'day' | 'sunset' | 'night'
+        musicMuted: false,
+        bassBoost: true,
+        customSongLoaded: false,
+        bassEnergy: 0,         // 0..1 instantaneous sub-bass energy for cabin shake
+        cameraFlashTimer: 0,
+        shiftAnimProgress: 0,
+        shifterPos: { x: 0, y: 0 }, // Interpolated H-gate position
+        seatPitchOffset: 8,    // Driver eye-level / horizon adjustment (-15 to +25) so road fills windshield
+        cameraViewMode: 0,     // 0 = Full RHD Cockpit, 1 = Close Dash/Windshield FPP, 2 = Hood/Bonnet Cam
+        lookYaw: 0,            // Free-look horizontal angle
+        lookPitch: 0           // Free-look vertical angle
+      };
+
+      // Yamuna Expressway Real Milestones (Greater Noida -> Agra)
+      const milestones = [
+        { km: 0, name: 'Pari Chowk (Greater Noida)',agraLeft: 165 },
+        { km: 14, name: 'Dankaur / Buddh Int\'l Circuit (BIC)', agraLeft: 151 },
+        { km: 28, name: 'Noida Int\'l Airport (Jewar Toll Plaza)', agraLeft: 137 },
+        { km: 52, name: 'Tappal / Aligarh Interchange', agraLeft: 113 },
+        { km: 95, name: 'Naujheel / Vrindavan Exit', agraLeft: 70 },
+        { km: 118, name: 'Mathura Toll Plaza', agraLeft: 47 },
+        { km: 165.5, name: 'Agra Ring Road / Taj Mahal Exit', agraLeft: 0 }
+      ];
+
+      // =======================================================================
+      // 2. COCKPIT IMAGE LOADER & PIXEL-ACCURATE WINDOW/WHEEL MASKING
+      //    Specifically engineered for `Original-6854-su-13.webp`
+      // =======================================================================
+      const cockpitCanvas = document.getElementById('cockpitCanvas');
+      const cockpitCtx = cockpitCanvas.getContext('2d');
+
+      const cockpitAssets = {
+        loaded: false,
+        rawImg: new Image(),
+        maskedBodyCanvas: document.createElement('canvas'),
+        steeringWheelCanvas: document.createElement('canvas'),
+        aspectRatio: 16 / 9
+      };
+
+      /**
+       * Checks if a normalized point (nx, ny in 0..1) is inside a polygon [{x,y}, ...]
+       */
+      function pointInPolygon(nx, ny, poly) {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const xi = poly[i].x, yi = poly[i].y;
+          const xj = poly[j].x, yj = poly[j].y;
+          const intersect = ((yi > ny) !== (yj > ny)) &&
+            (nx < (xj - xi) * (ny - yi) / ((yj - yi) || 1e-7) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      /**
+       * Processes `Original-6854-su-13.webp` into two high-res layers:
+       * 1) `maskedBodyCanvas`: The entire RHD Suzuki cabin with the outdoor green field & cloudy sky
+       *    in the windshield, left side window, and right side window cleanly cut out to transparency,
+       *    AND the static steering wheel area seamlessly replaced with the dark instrument cluster hood
+       *    so we don't see a double wheel when the steering wheel rotates!
+       * 2) `steeringWheelCanvas`: The extracted RHD Suzuki steering wheel from `Original-6854-su-13.webp`
+       *    with transparent inter-spoke cutouts so the live digital speedometer is visible through the wheel!
+       */
+      function processCockpitImage(img) {
+        const w = img.naturalWidth || img.width || 1920;
+        const h = img.naturalHeight || img.height || 1080;
+        cockpitAssets.aspectRatio = w / h;
+
+        const bodyCvs = cockpitAssets.maskedBodyCanvas;
+        bodyCvs.width = w;
+        bodyCvs.height = h;
+        const bCtx = bodyCvs.getContext('2d');
+        bCtx.drawImage(img, 0, 0, w, h);
+
+        // Extract pixel data for combined Polygon + Chroma/Luminance Window Masking
+        const imgData = bCtx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+
+        // 1. Windshield Polygon in `Original-6854-su-13.webp` (normalized 0..1 coordinates)
+        // Follows left A-pillar inner edge, wraps around Rear-View Mirror housing, right A-pillar inner edge,
+        // and stays strictly ABOVE the dashboard cowl, infotainment bezel, and steering wheel top rim!
+        const windshieldPoly = [
+          { x: 0.132, y: 0.000 },
+          { x: 0.421, y: 0.000 },
+          { x: 0.422, y: 0.056 }, // Left side of Rear-View Mirror
+          { x: 0.489, y: 0.058 },
+          { x: 0.491, y: 0.072 }, // Mirror stem
+          { x: 0.508, y: 0.072 },
+          { x: 0.510, y: 0.058 },
+          { x: 0.579, y: 0.056 }, // Right side of Rear-View Mirror
+          { x: 0.581, y: 0.000 },
+          { x: 0.865, y: 0.000 },
+          { x: 0.804, y: 0.312 }, // Right A-pillar base
+          { x: 0.778, y: 0.304 },
+          { x: 0.752, y: 0.264 }, // Stay ABOVE top leather rim of steering wheel
+          { x: 0.680, y: 0.264 }, // Stay ABOVE top leather rim of steering wheel
+          { x: 0.642, y: 0.292 },
+          { x: 0.568, y: 0.290 }, // Right of center infotainment screen
+          { x: 0.562, y: 0.258 }, // Top-right of center infotainment bezel
+          { x: 0.394, y: 0.258 }, // Top-left of center infotainment bezel
+          { x: 0.388, y: 0.296 }, // Left of center infotainment screen
+          { x: 0.214, y: 0.314 }  // Left A-pillar base
+        ];
+
+        // 2. Left Side Door Window Polygon (above left door trim & outside left side mirror)
+        const leftWindowPoly = [
+          { x: 0.000, y: 0.000 },
+          { x: 0.028, y: 0.000 },
+          { x: 0.095, y: 0.188 },
+          { x: 0.098, y: 0.365 },
+          { x: 0.088, y: 0.365 },
+          { x: 0.084, y: 0.240 }, // Around left side-mirror casing
+          { x: 0.055, y: 0.205 },
+          { x: 0.000, y: 0.202 }
+        ];
+
+        // 3. Right Side Door Window Polygon (above right door trim & outside right side mirror)
+        const rightWindowPoly = [
+          { x: 0.976, y: 0.000 },
+          { x: 1.000, y: 0.000 },
+          { x: 1.000, y: 0.222 },
+          { x: 0.942, y: 0.225 }, // Around right side-mirror casing
+          { x: 0.912, y: 0.258 },
+          { x: 0.905, y: 0.372 },
+          { x: 0.900, y: 0.372 },
+          { x: 0.908, y: 0.195 }
+        ];
+
+        // Loop over upper 38% of image to mask out sky & green field in the windows
+        const maxWindowRow = Math.floor(h * 0.38);
+        for (let y = 0; y < maxWindowRow; y++) {
+          const ny = y / h;
+          for (let x = 0; x < w; x++) {
+            const nx = x / w;
+            const idx = (y * w + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+
+            // Explicitly protect the steering wheel top rim & instrument cluster hood from ever being erased
+            const wDx = (nx - 0.7175) / 0.128;
+            const wDy = (ny - 0.508) / 0.232;
+            if (wDx * wDx + wDy * wDy <= 1.02) {
+              continue;
+            }
+
+            const inWindshield = pointInPolygon(nx, ny, windshieldPoly);
+            const inLeftWin = !inWindshield && pointInPolygon(nx, ny, leftWindowPoly);
+            const inRightWin = !inWindshield && !inLeftWin && pointInPolygon(nx, ny, rightWindowPoly);
+
+            if (inWindshield || inLeftWin || inRightWin) {
+              // Protect dark interior pixels (wipers, mirror edges, A-pillar seals)
+              const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+              const isGreenGrass = (g > r * 1.04 && g > b * 1.12 && luma > 55);
+              const isBrightSky = (luma > 95);
+
+              if (isGreenGrass || isBrightSky || ny < 0.245) {
+                if (luma < 48 && ny > 0.25) {
+                  // Dark wiper blade / cowl edge -> keep slightly translucent dark
+                  data[idx + 3] = 225;
+                } else if (luma < 75 && (nx < 0.155 || nx > 0.845)) {
+                  // A-pillar rubber trim transition -> feather alpha
+                  data[idx + 3] = Math.min(255, Math.max(0, (80 - luma) * 5));
+                } else {
+                  data[idx + 3] = 0; // 100% transparent window opening!
+                }
+              }
+            }
+          }
+        }
+
+        bCtx.putImageData(imgData, 0, 0);
+
+        // =====================================================================
+        // EXTRACT ROTATABLE RHD SUZUKI STEERING WHEEL FROM `Original-6854-su-13.webp`
+        // Wheel Center in image: cx = 71.75%, cy = 50.8%
+        // Outer Rim Radius: rx = 12.55% of width, ry = 22.6% of height
+        // =====================================================================
+        const wheelSize = Math.floor(Math.max(w * 0.26, h * 0.46));
+        const wCvs = cockpitAssets.steeringWheelCanvas;
+        wCvs.width = wheelSize;
+        wCvs.height = wheelSize;
+        const wCtx = wCvs.getContext('2d');
+
+        const cx = w * 0.7175;
+        const cy = h * 0.508;
+        const rx = w * 0.1255;
+        const ry = h * 0.226;
+
+        // Draw normalized circular steering wheel patch onto wheelCanvas
+        wCtx.save();
+        wCtx.beginPath();
+        wCtx.arc(wheelSize / 2, wheelSize / 2, wheelSize * 0.49, 0, Math.PI * 2);
+        wCtx.closePath();
+        wCtx.clip();
+
+        wCtx.drawImage(
+          img,
+          cx - rx, cy - ry, rx * 2, ry * 2,
+          0, 0, wheelSize, wheelSize
+        );
+        wCtx.restore();
+
+        // Cut out the 3 internal openings between the steering wheel rim, airbag hub, and spokes
+        // while keeping the entire leather outer rim (dist 0.76..0.955) 100% solid opaque!
+        const wData = wCtx.getImageData(0, 0, wheelSize, wheelSize);
+        const wd = wData.data;
+        const half = wheelSize / 2;
+
+        for (let py = 0; py < wheelSize; py++) {
+          for (let px = 0; px < wheelSize; px++) {
+            const dx = (px - half) / half; // -1..1
+            const dy = (py - half) / half; // -1..1
+            const dist = Math.hypot(dx, dy);
+            const pIdx = (py * wheelSize + px) * 4;
+
+            // Outside outer leather rim -> transparent
+            if (dist > 0.962) {
+              wd[pIdx + 3] = 0;
+              continue;
+            }
+            // Smooth outer anti-aliased edge
+            if (dist > 0.935) {
+              // Darken any bright sky reflection on outer edge of top rim
+              wd[pIdx] = Math.min(wd[pIdx], 55);
+              wd[pIdx + 1] = Math.min(wd[pIdx + 1], 60);
+              wd[pIdx + 2] = Math.min(wd[pIdx + 2], 68);
+              wd[pIdx + 3] = Math.floor(((0.962 - dist) / 0.027) * 255);
+              continue;
+            }
+
+            // Solid leather rim ring (0.76 <= dist <= 0.935) & center airbag hub (dist <= 0.43)
+            if (dist >= 0.76 || dist <= 0.43) {
+              wd[pIdx + 3] = 255;
+              continue;
+            }
+
+            // Inside rim (dist between 0.43 and 0.76):
+            // Keep the 3 spokes:
+            // - Left spoke (buttons): dx < -0.20 and -0.18 < dy < 0.25
+            // - Right spoke (buttons): dx > 0.20 and -0.18 < dy < 0.25
+            // - Bottom dual-V silver spoke: dy > 0.22 and |dx| < 0.30
+            const inLeftSpoke = (dx < -0.20 && dy > -0.18 && dy < 0.25);
+            const inRightSpoke = (dx > 0.20 && dy > -0.18 && dy < 0.25);
+            const inBottomSpoke = (dy > 0.22 && Math.abs(dx) < 0.30);
+
+            if (!inLeftSpoke && !inRightSpoke && !inBottomSpoke) {
+              wd[pIdx + 3] = 0; // Transparent opening between spokes!
+            } else {
+              wd[pIdx + 3] = 255;
+            }
+          }
+        }
+        wCtx.putImageData(wData, 0, 0);
+
+        // Reconstruct a clean, recessed dark instrument cluster binnacle behind the steering wheel
+        // on `maskedBodyCanvas` so rotating the wheel never reveals static spokes or sky bleed
+        bCtx.save();
+        bCtx.globalCompositeOperation = 'source-over';
+        const hoodGrad = bCtx.createRadialGradient(cx, cy - ry * 0.1, rx * 0.1, cx, cy, rx * 0.95);
+        hoodGrad.addColorStop(0, '#0b0f17');
+        hoodGrad.addColorStop(0.65, '#131822');
+        hoodGrad.addColorStop(1, '#1b202b');
+        bCtx.fillStyle = hoodGrad;
+        bCtx.beginPath();
+        bCtx.ellipse(cx, cy, rx * 0.92, ry * 0.92, 0, 0, Math.PI * 2);
+        bCtx.fill();
+
+        // Draw subtle analog tachometer (left) & speedometer (right) dial rings inside the recessed cluster
+        bCtx.strokeStyle = 'rgba(148, 163, 184, 0.22)';
+        bCtx.lineWidth = Math.max(2, w * 0.0016);
+        bCtx.beginPath();
+        bCtx.arc(cx - rx * 0.42, cy - ry * 0.28, rx * 0.23, Math.PI * 0.75, Math.PI * 2.15);
+        bCtx.stroke();
+        bCtx.beginPath();
+        bCtx.arc(cx + rx * 0.42, cy - ry * 0.28, rx * 0.23, Math.PI * 0.85, Math.PI * 2.25);
+        bCtx.stroke();
+        bCtx.restore();
+
+        cockpitAssets.loaded = true;
+        const statusEl = document.getElementById('modalCockpitStatus');
+        if (statusEl) {
+          statusEl.textContent = '✓ Original-6854-su-13.webp loaded & windshield/wheel masked!';
+          statusEl.className = 'text-[11px] text-emerald-400 font-semibold';
+        }
+      }
+
+      // Load `Original-6854-su-13.webp` automatically
+      cockpitAssets.rawImg.crossOrigin = 'anonymous';
+      cockpitAssets.rawImg.onload = function () {
+        processCockpitImage(cockpitAssets.rawImg);
+      };
+      cockpitAssets.rawImg.onerror = function () {
+        const statusEl = document.getElementById('modalCockpitStatus');
+        if (statusEl) {
+          statusEl.textContent = 'Using built-in RHD Suzuki cockpit vector replica (or click Select Image for Original-6854-su-13.webp)';
+          statusEl.className = 'text-[11px] text-amber-300';
+        }
+      };
+      cockpitAssets.rawImg.src = 'Original-6854-su-13.webp';
+
+      // Allow user to manually load `Original-6854-su-13.webp` if running locally from another folder
+      const cockpitFileInput = document.getElementById('cockpitFileInput');
+      document.getElementById('btnPickCockpit').addEventListener('click', () => cockpitFileInput.click());
+      document.getElementById('modalPickCockpitBtn').addEventListener('click', () => cockpitFileInput.click());
+      cockpitFileInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const url = URL.createObjectURL(file);
+        const customImg = new Image();
+        customImg.onload = () => {
+          processCockpitImage(customImg);
+          showHighwayToast('COCKPIT IMAGE LOADED', file.name + ' masked & active!');
+        };
+        customImg.src = url;
+      });
+
+      // =======================================================================
+      // 3. COMPOSITE COCKPIT RENDERER (Draws Masked Photo + Rotating Wheel + Shifter + Pedals)
+      // =======================================================================
+      function resizeCockpitCanvas() {
+        cockpitCanvas.width = cockpitCanvas.clientWidth * window.devicePixelRatio;
+        cockpitCanvas.height = cockpitCanvas.clientHeight * window.devicePixelRatio;
+      }
+      window.addEventListener('resize', resizeCockpitCanvas);
+      resizeCockpitCanvas();
+
+      function renderCockpitOverlay(dt) {
+        const cw = cockpitCanvas.width;
+        const ch = cockpitCanvas.height;
+        cockpitCtx.clearRect(0, 0, cw, ch);
+
+        if (cockpitAssets.loaded) {
+          // 1. Draw the masked RHD cabin body (`Original-6854-su-13.webp` with transparent windows)
+          cockpitCtx.drawImage(cockpitAssets.maskedBodyCanvas, 0, 0, cw, ch);
+        } else {
+          // High-detail fallback RHD Suzuki Cockpit if image is still loading
+          drawFallbackRHDCockpit(cockpitCtx, cw, ch);
+        }
+
+        // 2. Draw Animated Footwell Pedals (Clutch, Brake, Accelerator at x: 60.5%, 64.6%, 68.8%, y: 74%)
+        drawAnimatedPedals(cockpitCtx, cw, ch);
+
+        // 3. Draw Animated 5-Speed Manual Gear Shifter in the Center Console (x: 49.2%, y: 81.5%)
+        drawAnimatedGearStick(cockpitCtx, cw, ch, dt);
+
+        // 4. Draw Rotating RHD Suzuki Steering Wheel centered at (71.75%, 50.8%)
+        drawRotatingSteeringWheel(cockpitCtx, cw, ch);
+      }
+
+      function drawAnimatedPedals(ctx, cw, ch) {
+        const pedals = [
+          { label: 'C', x: cw * 0.604, y: ch * 0.736, press: state.clutch, color: '#94a3b8' },
+          { label: 'B', x: cw * 0.646, y: ch * 0.736, press: state.brake, color: '#f43f5e' },
+          { label: 'A', x: cw * 0.690, y: ch * 0.738, press: state.throttle, color: '#10b981' }
+        ];
+
+        pedals.forEach((p) => {
+          ctx.save();
+          const pressOffset = p.press * (ch * 0.014);
+          const pw = cw * 0.022;
+          const ph = ch * 0.045 * (1 - p.press * 0.18);
+
+          // Glow when pressed
+          if (p.press > 0.05) {
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 14 * p.press;
+          }
+
+          ctx.fillStyle = p.press > 0.05 ? p.color : 'rgba(30, 41, 59, 0.75)';
+          ctx.strokeStyle = p.press > 0.05 ? '#ffffff' : 'rgba(148, 163, 184, 0.45)';
+          ctx.lineWidth = 2;
+
+          ctx.beginPath();
+          ctx.roundRect(p.x - pw / 2, p.y - ph / 2 + pressOffset, pw, ph, 5);
+          ctx.fill();
+          ctx.stroke();
+
+          // Rubber grip ribs
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
+          for (let i = -1; i <= 1; i++) {
+            ctx.fillRect(p.x - pw * 0.35, p.y + i * (ph * 0.22) + pressOffset, pw * 0.7, 2);
+          }
+          ctx.restore();
+        });
+      }
+
+      function drawAnimatedGearStick(ctx, cw, ch, dt) {
+        // Target H-Gate offsets for 5-speed Manual + Reverse:
+        // 1: (-1, -1), 2: (-1, +1), 3: (0, -1), 4: (0, +1), 5: (+1, -1), R: (+1, +1), N: (0, 0)
+        const gateMap = {
+          '1': { x: -1, y: -1 },
+          '2': { x: -1, y: 1 },
+          '3': { x: 0, y: -1 },
+          '4': { x: 0, y: 1 },
+          '5': { x: 1, y: -1 },
+          '0': { x: 0, y: 0 },
+          '-1': { x: 1, y: 1 }
+        };
+        const target = gateMap[String(state.gear)] || { x: 0, y: 0 };
+        state.shifterPos.x += (target.x - state.shifterPos.x) * Math.min(1, dt * 12);
+        state.shifterPos.y += (target.y - state.shifterPos.y) * Math.min(1, dt * 12);
+
+        const baseCx = cw * 0.491;
+        const baseCy = ch * 0.875;
+        const knobCx = cw * 0.491 + state.shifterPos.x * (cw * 0.013);
+        const knobCy = ch * 0.798 + state.shifterPos.y * (ch * 0.024);
+        const knobRadius = Math.max(14, cw * 0.0175);
+
+        ctx.save();
+        // Leather boot shadow
+        ctx.fillStyle = 'rgba(10, 13, 18, 0.85)';
+        ctx.beginPath();
+        ctx.ellipse(baseCx, baseCy, cw * 0.026, ch * 0.042, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Metallic shifter shaft
+        ctx.strokeStyle = '#64748b';
+        ctx.lineWidth = Math.max(6, cw * 0.006);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(baseCx, baseCy);
+        ctx.lineTo(knobCx, knobCy);
+        ctx.stroke();
+
+        // Glossy Spherical 5-Speed Shift Knob
+        const grad = ctx.createRadialGradient(
+          knobCx - knobRadius * 0.3,
+          knobCy - knobRadius * 0.3,
+          knobRadius * 0.1,
+          knobCx,
+          knobCy,
+          knobRadius
+        );
+        grad.addColorStop(0, '#475569');
+        grad.addColorStop(0.5, '#1e293b');
+        grad.addColorStop(1, '#090d16');
+
+        ctx.fillStyle = grad;
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(knobCx, knobCy, knobRadius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // H-pattern engraving on top of the knob
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = `bold ${Math.max(8, Math.floor(knobRadius * 0.48))}px "JetBrains Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const gearLabel = state.gear === 0 ? 'N' : (state.gear === -1 ? 'R' : String(state.gear));
+        ctx.fillText('1 3 5', knobCx, knobCy - knobRadius * 0.36);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText(gearLabel, knobCx, knobCy + 1);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText('2 4 R', knobCx, knobCy + knobRadius * 0.42);
+        ctx.restore();
+      }
+
+      function drawRotatingSteeringWheel(ctx, cw, ch) {
+        const wheelCx = cw * 0.7175;
+        const wheelCy = ch * 0.508;
+        const rx = cw * 0.1255;
+        const ry = ch * 0.226;
+        const angleRad = (state.steerAngleDeg * Math.PI) / 180;
+
+        ctx.save();
+        ctx.translate(wheelCx, wheelCy);
+        // Scale to match the aspect ratio of the steering wheel in the 16:9 image
+        ctx.scale(1, ry / rx);
+        ctx.rotate(angleRad);
+
+        if (cockpitAssets.loaded) {
+          ctx.drawImage(cockpitAssets.steeringWheelCanvas, -rx, -rx, rx * 2, rx * 2);
+        } else {
+          // Crisp fallback vector Suzuki RHD Steering Wheel
+          ctx.strokeStyle = '#1e293b';
+          ctx.lineWidth = rx * 0.16;
+          ctx.beginPath();
+          ctx.arc(0, 0, rx * 0.9, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Spokes
+          ctx.lineWidth = rx * 0.14;
+          ctx.beginPath();
+          ctx.moveTo(-rx * 0.85, 0);
+          ctx.lineTo(rx * 0.85, 0);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, rx * 0.85);
+          ctx.stroke();
+
+          // Center hub + Suzuki 'S' emblem
+          ctx.fillStyle = '#0f172a';
+          ctx.beginPath();
+          ctx.arc(0, 0, rx * 0.36, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#e2e8f0';
+          ctx.font = `900 ${Math.floor(rx * 0.32)}px "Orbitron", sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('S', 0, 0);
+        }
+
+        ctx.restore();
+      }
+
+      function drawFallbackRHDCockpit(ctx, cw, ch) {
+        // Draws a sleek RHD cockpit silhouette if `Original-6854-su-13.webp` hasn't finished loading yet
+        ctx.save();
+        ctx.fillStyle = '#111622';
+        // Left A-pillar
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(cw * 0.135, 0);
+        ctx.lineTo(cw * 0.215, ch * 0.32);
+        ctx.lineTo(cw * 0.095, ch * 0.36);
+        ctx.lineTo(0, ch * 0.02);
+        ctx.closePath();
+        ctx.fill();
+
+        // Right A-pillar
+        ctx.beginPath();
+        ctx.moveTo(cw * 0.865, 0);
+        ctx.lineTo(cw, 0);
+        ctx.lineTo(cw, ch * 0.02);
+        ctx.lineTo(cw * 0.905, ch * 0.37);
+        ctx.lineTo(cw * 0.802, ch * 0.32);
+        ctx.closePath();
+        ctx.fill();
+
+        // Lower Dashboard & Doors
+        const dashGrad = ctx.createLinearGradient(0, ch * 0.31, 0, ch);
+        dashGrad.addColorStop(0, '#1e2430');
+        dashGrad.addColorStop(0.35, '#12161f');
+        dashGrad.addColorStop(1, '#080a0f');
+        ctx.fillStyle = dashGrad;
+        ctx.beginPath();
+        ctx.moveTo(0, ch * 0.36);
+        ctx.lineTo(cw * 0.215, ch * 0.318);
+        ctx.lineTo(cw * 0.802, ch * 0.318);
+        ctx.lineTo(cw, ch * 0.37);
+        ctx.lineTo(cw, ch);
+        ctx.lineTo(0, ch);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // =======================================================================
+      // 4. WEB AUDIO API: LOOPING CAR SONG ("BLUE BASS - RAJ CHALE") + ENGINE + HORN
+      // =======================================================================
+      const carAudio = {
+        ctx: null,
+        masterGain: null,
+        musicGain: null,
+        bassFilter: null,
+        analyser: null,
+        freqData: null,
+        engineOsc1: null,
+        engineOsc2: null,
+        engineGain: null,
+        hornOsc1: null,
+        hornOsc2: null,
+        hornGain: null,
+        beatInterval: null,
+        stepIndex: 0,
+        mediaElementConnected: false
+      };
+
+      const carSongPlayer = document.getElementById('carSongPlayer');
+      const miniVisCanvas = document.getElementById('miniVisualizerCanvas');
+      const miniVisCtx = miniVisCanvas.getContext('2d');
+
+      function initAudioEngine() {
+        if (carAudio.ctx) {
+          if (carAudio.ctx.state === 'suspended') carAudio.ctx.resume();
+          return;
+        }
+
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioCtx();
+        carAudio.ctx = ctx;
+
+        // Master Gain
+        const masterGain = ctx.createGain();
+        masterGain.gain.value = 0.9;
+        masterGain.connect(ctx.destination);
+        carAudio.masterGain = masterGain;
+
+        // Sub-Bass Boost Biquad Filter for Cabin Audio
+        const bassFilter = ctx.createBiquadFilter();
+        bassFilter.type = 'lowshelf';
+        bassFilter.frequency.value = 95;
+        bassFilter.gain.value = state.bassBoost ? 11 : 2;
+        carAudio.bassFilter = bassFilter;
+
+        // Analyser for Real-Time Infotainment Visualizer & Sub-Bass Cabin Vibration
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
+        carAudio.analyser = analyser;
+        carAudio.freqData = new Uint8Array(analyser.frequencyBinCount);
+
+        // Music Bus Gain
+        const musicGain = ctx.createGain();
+        musicGain.gain.value = state.musicMuted ? 0 : 0.78;
+        musicGain.connect(bassFilter);
+        bassFilter.connect(analyser);
+        analyser.connect(masterGain);
+        carAudio.musicGain = musicGain;
+
+        // Connect `<audio id="carSongPlayer" loop>` into Web Audio Graph
+        try {
+          const mediaSource = ctx.createMediaElementSource(carSongPlayer);
+          mediaSource.connect(musicGain);
+          carAudio.mediaElementConnected = true;
+        } catch (err) {
+          // Fallback if media element already connected
+        }
+
+        // Try playing the HTML5 <audio loop> element if a valid source exists
+        carSongPlayer.loop = true;
+        const playPromise = carSongPlayer.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            if (!carSongPlayer.paused && carSongPlayer.duration > 0) {
+              state.customSongLoaded = true;
+            }
+          }).catch(() => {
+            // Built-in Haryanvi Trap / Sub-Bass Synth Loop handles immediate playback seamlessly!
+          });
+        }
+
+        // =====================================================================
+        // REALISTIC CAR ENGINE & EXHAUST SYNTHESIZER
+        // =====================================================================
+        const engineGain = ctx.createGain();
+        engineGain.gain.value = 0.14;
+
+        const engineFilter = ctx.createBiquadFilter();
+        engineFilter.type = 'lowpass';
+        engineFilter.frequency.value = 260;
+
+        const osc1 = ctx.createOscillator();
+        osc1.type = 'sawtooth';
+        osc1.frequency.value = 48;
+
+        const osc2 = ctx.createOscillator();
+        osc2.type = 'triangle';
+        osc2.frequency.value = 96;
+
+        osc1.connect(engineFilter);
+        osc2.connect(engineFilter);
+        engineFilter.connect(engineGain);
+        engineGain.connect(masterGain);
+
+        osc1.start();
+        osc2.start();
+        carAudio.engineOsc1 = osc1;
+        carAudio.engineOsc2 = osc2;
+        carAudio.engineFilter = engineFilter;
+        carAudio.engineGain = engineGain;
+
+        // =====================================================================
+        // INDIAN DUAL-TONE HIGHWAY HORN SYNTH (400Hz + 500Hz)
+        // =====================================================================
+        const hornGain = ctx.createGain();
+        hornGain.gain.value = 0;
+        const hOsc1 = ctx.createOscillator();
+        hOsc1.type = 'sawtooth';
+        hOsc1.frequency.value = 415;
+        const hOsc2 = ctx.createOscillator();
+        hOsc2.type = 'sawtooth';
+        hOsc2.frequency.value = 515;
+
+        const hornFilter = ctx.createBiquadFilter();
+        hornFilter.type = 'bandpass';
+        hornFilter.frequency.value = 900;
+        hornFilter.Q.value = 1.4;
+
+        hOsc1.connect(hornFilter);
+        hOsc2.connect(hornFilter);
+        hornFilter.connect(hornGain);
+        hornGain.connect(masterGain);
+        hOsc1.start();
+        hOsc2.start();
+        carAudio.hornGain = hornGain;
+
+        // =====================================================================
+        // BUILT-IN LOOPING HARYANVI BASS MIX ("BLUE BASS - RAJ CHALE" VIBE)
+        // Plays continuously on repeat whenever external MP3 isn't actively playing
+        // =====================================================================
+        startHaryanviBassLoopSynth();
+      }
+
+      function startHaryanviBassLoopSynth() {
+        if (carAudio.beatInterval) clearInterval(carAudio.beatInterval);
+
+        // 96 BPM -> 16th note = 156 ms
+        const stepMs = 152;
+        // Desi folk minor-pentatonic hook (D minor / G minor folk bounce)
+        const leadNotes = [
+          293.66, 0, 349.23, 392.00, 440.00, 0, 392.00, 349.23,
+          293.66, 293.66, 349.23, 0, 261.63, 293.66, 0, 220.00
+        ];
+        // Heavy 808 Sub-Bass pattern
+        const bassNotes = [
+          73.42, 0, 0, 73.42, 0, 0, 87.31, 0,
+          73.42, 0, 73.42, 0, 65.41, 0, 82.41, 0
+        ];
+
+        carAudio.beatInterval = setInterval(() => {
+          if (!carAudio.ctx || state.musicMuted) return;
+          // If user loaded a custom song file and it is actively playing, let the MP3 drive the audio bus
+          if (state.customSongLoaded && !carSongPlayer.paused) return;
+
+          const ctx = carAudio.ctx;
+          const now = ctx.currentTime;
+          const step = carAudio.stepIndex % 16;
+
+          // 1. Punchy 808 Kick + Sub-Bass Glide
+          const bFreq = bassNotes[step];
+          if (bFreq > 0) {
+            const subOsc = ctx.createOscillator();
+            const subGain = ctx.createGain();
+            subOsc.type = 'sine';
+            subOsc.frequency.setValueAtTime(bFreq * 2.1, now);
+            subOsc.frequency.exponentialRampToValueAtTime(bFreq, now + 0.065);
+
+            subGain.gain.setValueAtTime(0.85, now);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+            subOsc.connect(subGain);
+            subGain.connect(carAudio.musicGain);
+            subOsc.start(now);
+            subOsc.stop(now + 0.29);
+          }
+
+          // 2. Crisp Trap Snare / Clap on steps 4 and 12
+          if (step === 4 || step === 12) {
+            const noiseOsc = ctx.createOscillator();
+            const snareGain = ctx.createGain();
+            noiseOsc.type = 'triangle';
+            noiseOsc.frequency.setValueAtTime(220, now);
+            noiseOsc.frequency.exponentialRampToValueAtTime(90, now + 0.11);
+            snareGain.gain.setValueAtTime(0.38, now);
+            snareGain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+            noiseOsc.connect(snareGain);
+            snareGain.connect(carAudio.musicGain);
+            noiseOsc.start(now);
+            noiseOsc.stop(now + 0.13);
+          }
+
+          // 3. Desi Tumbi / Brass Synth Hook
+          const lFreq = leadNotes[step];
+          if (lFreq > 0) {
+            const leadOsc = ctx.createOscillator();
+            const leadFilter = ctx.createBiquadFilter();
+            const leadGain = ctx.createGain();
+
+            leadOsc.type = 'sawtooth';
+            leadOsc.frequency.setValueAtTime(lFreq, now);
+
+            leadFilter.type = 'bandpass';
+            leadFilter.frequency.setValueAtTime(lFreq * 2.4, now);
+            leadFilter.Q.value = 3.2;
+
+            leadGain.gain.setValueAtTime(0.18, now);
+            leadGain.gain.exponentialRampToValueAtTime(0.008, now + 0.14);
+
+            leadOsc.connect(leadFilter);
+            leadFilter.connect(leadGain);
+            leadGain.connect(carAudio.musicGain);
+            leadOsc.start(now);
+            leadOsc.stop(now + 0.15);
+          }
+
+          carAudio.stepIndex++;
+        }, stepMs);
+      }
+
+      // Load Custom Song File (`<input type="file">`) for Looping Playback
+      const songFileInput = document.getElementById('songFileInput');
+      document.getElementById('btnPickSong').addEventListener('click', () => songFileInput.click());
+      document.getElementById('modalPickSongBtn').addEventListener('click', () => songFileInput.click());
+      document.getElementById('screenLoadSongBtn').addEventListener('click', () => songFileInput.click());
+
+      songFileInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        initAudioEngine();
+        const url = URL.createObjectURL(file);
+        carSongPlayer.src = url;
+        carSongPlayer.loop = true;
+        carSongPlayer.play().then(() => {
+          state.customSongLoaded = true;
+          const cleanName = file.name.replace(/\.[^/.]+$/, '');
+          document.getElementById('hudSongName').textContent = cleanName;
+          document.getElementById('trackTitleScreen').textContent = '🎵 ' + cleanName.toUpperCase();
+          document.getElementById('modalSongStatus').textContent = '✓ Loaded on Repeat: ' + file.name;
+          document.getElementById('modalSongStatus').className = 'text-[11px] text-emerald-400 font-bold';
+          showHighwayToast('CAR STEREO LOOP ACTIVE', 'Playing on Repeat: ' + cleanName);
+        }).catch((err) => {
+          console.warn('Audio play error:', err);
+        });
+      });
+
+      function updateAudioEngine() {
+        if (!carAudio.ctx) return;
+        const now = carAudio.ctx.currentTime;
+
+        // Update Engine Pitch & Filter from RPM (850..6800)
+        const normRpm = (state.rpm - 800) / 6000;
+        const baseFreq = 38 + normRpm * 135;
+        carAudio.engineOsc1.frequency.setTargetAtTime(baseFreq, now, 0.04);
+        carAudio.engineOsc2.frequency.setTargetAtTime(baseFreq * 2.0, now, 0.04);
+        carAudio.engineFilter.frequency.setTargetAtTime(180 + normRpm * 950 + state.throttle * 300, now, 0.05);
+        carAudio.engineGain.gain.setTargetAtTime(0.09 + normRpm * 0.14 + state.throttle * 0.06, now, 0.05);
+
+        // Update Horn
+        carAudio.hornGain.gain.setTargetAtTime(state.hornActive ? 0.32 : 0, now, 0.015);
+
+        // Update Analyser & Infotainment Spectrum Visualizer
+        if (carAudio.analyser && carAudio.freqData) {
+          carAudio.analyser.getByteFrequencyData(carAudio.freqData);
+
+          // Compute Sub-Bass Energy (bins 0..4)
+          let subSum = 0;
+          for (let i = 0; i < 5; i++) subSum += carAudio.freqData[i];
+          state.bassEnergy = (subSum / (5 * 255)) * (state.bassBoost ? 1.35 : 0.6);
+
+          // Draw bars on infotainment screen
+          const vw = miniVisCanvas.width;
+          const vh = miniVisCanvas.height;
+          miniVisCtx.clearRect(0, 0, vw, vh);
+          const barCount = 12;
+          const barW = (vw / barCount) - 2;
+          for (let i = 0; i < barCount; i++) {
+            const val = carAudio.freqData[i * 2] / 255;
+            const bh = Math.max(2, val * vh);
+            miniVisCtx.fillStyle = i < 4 ? '#f59e0b' : (i < 8 ? '#38bdf8' : '#34d399');
+            miniVisCtx.fillRect(i * (barW + 2), vh - bh, barW, bh);
+          }
+        }
+      }
+
+      // =======================================================================
+      // 5. THREE.JS 3D REAL-LIFE YAMUNA EXPRESSWAY ENVIRONMENT
+      //    (6-Lane Concrete Pavement, Median Shrubs, YEIDA Gantries, Jewar Toll, Traffic)
+      // =======================================================================
+      const highwayCanvas = document.getElementById('highwayCanvas');
+      const rearMirrorCanvas = document.getElementById('rearMirrorCanvas');
+      const rearMirrorCtx = rearMirrorCanvas.getContext('2d');
+
+      const renderer = new THREE.WebGLRenderer({
+        canvas: highwayCanvas,
+        antialias: true,
+        powerPreference: 'high-performance'
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x7dd3fc);
+      scene.fog = new THREE.FogExp2(0xbae6fd, 0.0016);
+
+      // Primary FPP Driver Camera (Positioned in RHD driver's seat looking down Yamuna Expressway)
+      const driverCamera = new THREE.PerspectiveCamera(
+        52,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        750
+      );
+      driverCamera.position.set(-6.5, 1.25, 0);
+
+      /**
+       * CRITICAL ROAD-VISIBILITY FIX:
+       * Adjusted vertical projection shift and camera height so the 3D Yamuna Expressway
+       * carriageway, white lane lines, and traffic sit perfectly in the upper 60% of the screen
+       * with zero sky obstruction.
+       */
+      function updateDriverCameraProjection() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        driverCamera.aspect = w / h;
+
+        // Shift optical center down so the road fills the windshield and side windows clearly
+        let verticalShiftRatio = -0.08 + (state.seatPitchOffset * 0.005);
+        let horizontalShiftRatio = 0.04;
+
+        if (state.cameraViewMode === 1) {
+          // Close Dash / Wide Windshield FPP
+          verticalShiftRatio = -0.02 + (state.seatPitchOffset * 0.005);
+          horizontalShiftRatio = 0.02;
+        } else if (state.cameraViewMode === 2) {
+          // Bonnet / Hood Cam
+          verticalShiftRatio = 0.12 + (state.seatPitchOffset * 0.005);
+          horizontalShiftRatio = 0.0;
+        }
+
+        driverCamera.setViewOffset(
+          w,
+          h,
+          w * horizontalShiftRatio,
+          h * verticalShiftRatio,
+          w,
+          h
+        );
+        driverCamera.updateProjectionMatrix();
+      }
+      updateDriverCameraProjection();
+
+      // Rear-View Mirror Camera (Looks backward along the expressway)
+      const rearCamera = new THREE.PerspectiveCamera(50, 320 / 90, 0.5, 350);
+      const rearRenderTarget = new THREE.WebGLRenderTarget(320, 90);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.78);
+      scene.add(ambientLight);
+
+      const sunLight = new THREE.DirectionalLight(0xfffbeb, 0.95);
+      sunLight.position.set(60, 120, -80);
+      scene.add(sunLight);
+
+      // Player Headlight SpotLight (for Sunset/Night & High-Beam Dipper on Yamuna Expressway)
+      const headlightSpot = new THREE.SpotLight(0xe0f2fe, 0, 180, Math.PI / 5, 0.4, 1.2);
+      headlightSpot.position.set(-6.5, 1.1, -1.5);
+      headlightSpot.target.position.set(-6.5, 0.5, -90);
+      scene.add(headlightSpot);
+      scene.add(headlightSpot.target);
+
+      // Create Procedural Concrete Highway Texture (Pale grey PCC slabs + lane markings + expansion joints)
+      function createYamunaConcreteTexture() {
+        const cvs = document.createElement('canvas');
+        cvs.width = 1024;
+        cvs.height = 1024;
+        const c = cvs.getContext('2d');
+
+        // UP Agricultural Mustard & Wheat Fields on outer edges
+        c.fillStyle = '#4d7c0f';
+        c.fillRect(0, 0, 1024, 1024);
+
+        // Golden mustard crop strips
+        c.fillStyle = '#ca8a04';
+        c.fillRect(0, 0, 120, 1024);
+        c.fillRect(904, 0, 120, 1024);
+
+        // Left Carriageway (Our 3-Lane Northbound/Agra Concrete Highway: x = 180..480)
+        c.fillStyle = '#cbd5e1'; // Pale Grey PCC Concrete characteristic of Yamuna Expressway
+        c.fillRect(170, 0, 315, 1024);
+
+        // Right Carriageway (Oncoming 3-Lane Concrete Highway: x = 539..854)
+        c.fillRect(539, 0, 315, 1024);
+
+        // Central Divider Median (Green grass + crash barrier base: x = 485..539)
+        c.fillStyle = '#15803d';
+        c.fillRect(485, 0, 54, 1024);
+
+        // Subtle concrete texture noise & tire wear tracks in the 3 lanes
+        c.fillStyle = 'rgba(71, 85, 105, 0.09)';
+        for (let l = 0; l < 3; l++) {
+          const lx = 200 + l * 95;
+          c.fillRect(lx, 0, 65, 1024);
+          const rx = 565 + l * 95;
+          c.fillRect(rx, 0, 65, 1024);
+        }
+
+        // Concrete transverse expansion joints every 256px
+        c.strokeStyle = 'rgba(51, 65, 85, 0.45)';
+        c.lineWidth = 4;
+        for (let y = 0; y < 1024; y += 256) {
+          c.beginPath();
+          c.moveTo(170, y);
+          c.lineTo(485, y);
+          c.moveTo(539, y);
+          c.lineTo(854, y);
+          c.stroke();
+        }
+
+        // Solid White Outer Edge Lines & Yellow Median Lines
+        c.fillStyle = '#f8fafc';
+        c.fillRect(182, 0, 6, 1024);
+        c.fillRect(836, 0, 6, 1024);
+
+        c.fillStyle = '#facc15';
+        c.fillRect(474, 0, 6, 1024);
+        c.fillRect(544, 0, 6, 1024);
+
+        // Dashed White Lane Dividers (3 Lanes each way)
+        c.fillStyle = '#ffffff';
+        for (let y = 0; y < 1024; y += 128) {
+          // Left carriageway 2 dashed lane lines
+          c.fillRect(280, y + 20, 6, 68);
+          c.fillRect(378, y + 20, 6, 68);
+          // Right carriageway 2 dashed lane lines
+          c.fillRect(640, y + 20, 6, 68);
+          c.fillRect(738, y + 20, 6, 68);
+        }
+
+        const tex = new THREE.CanvasTexture(cvs);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(1, 18);
+        tex.anisotropy = 8;
+        return tex;
+      }
+
+      const roadTexture = createYamunaConcreteTexture();
+      const roadGeo = new THREE.PlaneGeometry(80, 900);
+      const roadMat = new THREE.MeshLambertMaterial({ map: roadTexture });
+      const roadMesh = new THREE.Mesh(roadGeo, roadMat);
+      roadMesh.rotation.x = -Math.PI / 2;
+      roadMesh.position.z = -380;
+      scene.add(roadMesh);
+
+      // Extended Agricultural Ground Plane
+      const terrainGeo = new THREE.PlaneGeometry(1400, 900);
+      const terrainMat = new THREE.MeshLambertMaterial({ color: 0x65a30d });
+      const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+      terrainMesh.rotation.x = -Math.PI / 2;
+      terrainMesh.position.set(0, -0.08, -380);
+      scene.add(terrainMesh);
+
+      // Continuous Metal Guardrails (Left Shoulder & Median Barriers)
+      const guardrailMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+      const leftRail = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.75, 900), guardrailMat);
+      leftRail.position.set(-13.2, 0.4, -380);
+      scene.add(leftRail);
+
+      const medianRailLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.85, 900), guardrailMat);
+      medianRailLeft.position.set(-1.1, 0.45, -380);
+      scene.add(medianRailLeft);
+
+      const medianRailRight = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.85, 900), guardrailMat);
+      medianRailRight.position.set(1.1, 0.45, -380);
+      scene.add(medianRailRight);
+
+      // =======================================================================
+      // 6. REPEATING ROADSIDE & MEDIAN OBJECTS (Shrubs, Solar Lights, Gantries, Milestones)
+      // =======================================================================
+      const worldProps = [];
+
+      // Create Overhead Green Highway Signboard Texture
+      function createGantrySignTexture(titleTop, titleMid, titleBot, isSpeedRadar) {
+        const cvs = document.createElement('canvas');
+        cvs.width = 1024;
+        cvs.height = 256;
+        const c = cvs.getContext('2d');
+
+        // Authentic Indian NH / Expressway Reflective Green Background
+        c.fillStyle = isSpeedRadar ? '#0f172a' : '#065f46';
+        c.fillRect(0, 0, 1024, 256);
+
+        // White Reflective Border
+        c.strokeStyle = '#ffffff';
+        c.lineWidth = 10;
+        c.strokeRect(12, 12, 1000, 232);
+
+        c.fillStyle = '#facc15';
+        c.font = '900 40px "Inter", sans-serif';
+        c.textAlign = 'center';
+        c.fillText(titleTop, 512, 72);
+
+        c.fillStyle = '#ffffff';
+        c.font = '800 46px "Inter", sans-serif';
+        c.fillText(titleMid, 512, 142);
+
+        c.fillStyle = isSpeedRadar ? '#38bdf8' : '#a7f3d0';
+        c.font = '700 34px "JetBrains Mono", monospace';
+        c.fillText(titleBot, 512, 208);
+
+        return new THREE.CanvasTexture(cvs);
+      }
+
+      const gantrySigns = [
+        createGantrySignTexture(
+          'यमुना एक्सप्रेसवे • YAMUNA EXPRESSWAY (YEIDA)',
+          'AGRA 150 KM ↑   |   MATHURA 98 KM ↑',
+          'NOIDA INT\'L AIRPORT (JEWAR) 16 KM ↗',
+          false
+        ),
+        createGantrySignTexture(
+          'CCTV SPEED RADAR ZONE • गति सीमा',
+          'LIGHT VEHICLES: 100 KM/H  |  HEAVY: 60 KM/H',
+          'KEEP LEFT TO LET FAST VEHICLES OVERTAKE',
+          true
+        ),
+        createGantrySignTexture(
+          'JEWAR TOLL PLAZA AHEAD • जेवर टोल प्लाजा',
+          'FASTag LANE 1-3   |   EMERGENCY SOS: 1800-102-7777',
+          'BUDDH INTERNATIONAL CIRCUIT (F1) PASSED',
+          false
+        )
+      ];
+
+      // BuildOverhead Gantries along the 600m loop
+      for (let i = 0; i < 3; i++) {
+        const zPos = -160 - i * 210;
+        const gantryGroup = new THREE.Group();
+
+        const pillarGeo = new THREE.CylinderGeometry(0.28, 0.28, 8.2, 8);
+        const pillarMat = new THREE.MeshLambertMaterial({ color: 0xcbd5e1 });
+
+        const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
+        leftPillar.position.set(-13.8, 4.1, 0);
+        gantryGroup.add(leftPillar);
+
+        const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
+        rightPillar.position.set(-0.6, 4.1, 0);
+        gantryGroup.add(rightPillar);
+
+        const crossBeam = new THREE.Mesh(
+          new THREE.BoxGeometry(13.8, 0.45, 0.45),
+          pillarMat
+        );
+        crossBeam.position.set(-7.2, 7.6, 0);
+        gantryGroup.add(crossBeam);
+
+        const boardMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(11.6, 2.5, 0.2),
+          new THREE.MeshBasicMaterial({ map: gantrySigns[i % gantrySigns.length] })
+        );
+        boardMesh.position.set(-7.0, 7.2, 0.2);
+        gantryGroup.add(boardMesh);
+
+        gantryGroup.position.z = zPos;
+        gantryGroup.userData = { isRadar: i === 1, triggered: false };
+        scene.add(gantryGroup);
+        worldProps.push({ mesh: gantryGroup, loopLength: 630 });
+      }
+
+      // Median Bougainvillea Shrubs, Solar Streetlights & Roadside Eucalyptus Trees
+      const bushGeo = new THREE.BoxGeometry(1.4, 1.35, 3.2);
+      const bushMat = new THREE.MeshLambertMaterial({ color: 0x166534 });
+      const flowerMat = new THREE.MeshLambertMaterial({ color: 0xdb2777 });
+      const poleMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+      const treeFoliageMat = new THREE.MeshLambertMaterial({ color: 0x14532d });
+      const treeTrunkMat = new THREE.MeshLambertMaterial({ color: 0x78350f });
+
+      for (let z = 10; z > -620; z -= 20) {
+        // Median Shrubbery (Blocks oncoming headlight glare like real Yamuna Expressway)
+        const bush = new THREE.Mesh(bushGeo, (Math.abs(z) % 60 === 0) ? flowerMat : bushMat);
+        bush.position.set(0, 0.7, z);
+        scene.add(bush);
+        worldProps.push({ mesh: bush, loopLength: 630 });
+
+        // Twin Solar Streetlight every 40m in the median
+        if (Math.abs(z) % 40 === 0) {
+          const lightGroup = new THREE.Group();
+          const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 9.5, 6), poleMat);
+          pole.position.y = 4.75;
+          lightGroup.add(pole);
+
+          const arm = new THREE.Mesh(new THREE.BoxGeometry(3.8, 0.12, 0.12), poleMat);
+          arm.position.set(0, 9.3, 0);
+          lightGroup.add(arm);
+
+          const lampMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+          const lampL = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.15, 0.3), lampMat);
+          lampL.position.set(-1.8, 9.2, 0);
+          const lampR = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.15, 0.3), lampMat);
+          lampR.position.set(1.8, 9.2, 0);
+          lightGroup.add(lampL, lampR);
+
+          lightGroup.position.set(0, 0, z);
+          scene.add(lightGroup);
+          worldProps.push({ mesh: lightGroup, loopLength: 630 });
+        }
+
+        // Left & Right Agricultural Boundary Eucalyptus Trees
+        const treeGroup = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.45, 3.2, 6), treeTrunkMat);
+        trunk.position.y = 1.6;
+        const crown = new THREE.Mesh(new THREE.ConeGeometry(2.2, 6.5, 7), treeFoliageMat);
+        crown.position.y = 5.4;
+        treeGroup.add(trunk, crown);
+
+        const sideX = (Math.abs(z) % 40 === 0) ? -19 - (Math.abs(z) % 7) : 19 + (Math.abs(z) % 7);
+        treeGroup.position.set(sideX, 0, z);
+        scene.add(treeGroup);
+        worldProps.push({ mesh: treeGroup, loopLength: 630 });
+      }
+
+      // =======================================================================
+      // 7. DYNAMIC INDIAN HIGHWAY AI TRAFFIC (Cars, SUVs, Goods Trucks)
+      // =======================================================================
+      const aiVehicles = [];
+      const laneCentersLeft = [-10.3, -6.5, -2.8]; // Same direction (Left = Slow Truck Lane, Mid = Cruise, Right = Fast Overtaking)
+      const laneCentersRight = [2.8, 6.5, 10.3];   // Oncoming carriageway (other side of median)
+
+      function createAIVehicle(isTruck, isOncoming, initialZ) {
+        const group = new THREE.Group();
+        const colors = [0xf8fafc, 0xcbd5e1, 0xef4444, 0x0284c7, 0xf59e0b, 0x1e293b];
+        const bodyColor = isTruck ? 0xd97706 : colors[Math.floor(Math.random() * colors.length)];
+
+        if (isTruck) {
+          // Indian Highway Goods Truck ("HORN OK PLEASE" style)
+          const cargo = new THREE.Mesh(
+            new THREE.BoxGeometry(2.45, 2.9, 6.8),
+            new THREE.MeshLambertMaterial({ color: 0xb45309 })
+          );
+          cargo.position.y = 1.85;
+          group.add(cargo);
+
+          const cab = new THREE.Mesh(
+            new THREE.BoxGeometry(2.35, 2.3, 2.1),
+            new THREE.MeshLambertMaterial({ color: 0xdc2626 })
+          );
+          cab.position.set(0, 1.55, isOncoming ? 4.2 : -4.2);
+          group.add(cab);
+        } else {
+          // Sedan / SUV
+          const chassis = new THREE.Mesh(
+            new THREE.BoxGeometry(1.95, 0.85, 4.4),
+            new THREE.MeshLambertMaterial({ color: bodyColor })
+          );
+          chassis.position.y = 0.68;
+          group.add(chassis);
+
+          const cabin = new THREE.Mesh(
+            new THREE.BoxGeometry(1.72, 0.72, 2.3),
+            new THREE.MeshLambertMaterial({ color: 0x0f172a })
+          );
+          cabin.position.set(0, 1.38, 0.15);
+          group.add(cabin);
+        }
+
+        // Tail lights (Red) & Headlights (White)
+        const lightZRear = isTruck ? (isOncoming ? -3.41 : 3.41) : (isOncoming ? -2.21 : 2.21);
+        const lightZFront = isTruck ? (isOncoming ? 5.26 : -5.26) : (isOncoming ? 2.21 : -2.21);
+
+        const tailMat = new THREE.MeshBasicMaterial({ color: 0xff1133 });
+        const headMat = new THREE.MeshBasicMaterial({ color: 0xfef9c3 });
+
+        const rearBar = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.22, 0.08), tailMat);
+        rearBar.position.set(0, 0.85, lightZRear);
+        group.add(rearBar);
+
+        const frontBar = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.22, 0.08), headMat);
+        frontBar.position.set(0, 0.8, lightZFront);
+        group.add(frontBar);
+
+        const laneIdx = isTruck ? 0 : Math.floor(Math.random() * 3);
+        const xPos = isOncoming ? laneCentersRight[laneIdx] : laneCentersLeft[laneIdx];
+        group.position.set(xPos, 0, initialZ);
+
+        scene.add(group);
+        return {
+          mesh: group,
+          isTruck,
+          isOncoming,
+          laneIdx,
+          targetX: xPos,
+          speedKmh: isOncoming ? (75 + Math.random() * 35) : (55 + Math.random() * 45)
+        };
+      }
+
+      // Spawn 10 same-direction vehicles (including closer ones so traffic is immediately visible) and 6 oncoming vehicles
+      for (let i = 0; i < 10; i++) {
+        aiVehicles.push(createAIVehicle(i % 3 === 0, false, -28 - i * 52));
+      }
+      for (let i = 0; i < 6; i++) {
+        aiVehicles.push(createAIVehicle(i % 2 === 0, true, -45 - i * 85));
+      }
+
+      // =======================================================================
+      // 8. KEYBOARD, MOUSE & TOUCH INPUT HANDLERS
+      // =======================================================================
+      const keys = {
+        up: false,
+        down: false,
+        left: false,
+        right: false
+      };
+
+      window.addEventListener('keydown', (e) => {
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') { keys.up = true; startEngineIfNeeded(); }
+        if (code === 'KeyS' || code === 'ArrowDown') { keys.down = true; startEngineIfNeeded(); }
+        if (code === 'KeyA' || code === 'ArrowLeft') { keys.left = true; state.leftIndicator = true; state.rightIndicator = false; }
+        if (code === 'KeyD' || code === 'ArrowRight') { keys.right = true; state.rightIndicator = true; state.leftIndicator = false; }
+        if (code === 'Space') { state.handbrake = true; e.preventDefault(); }
+        if (code === 'KeyH') { state.hornActive = true; triggerAIGiveWay(); }
+        if (code === 'KeyL') { triggerHighBeamDipper(true); triggerAIGiveWay(); }
+        if (code === 'KeyE') { shiftGearManual(1); }
+        if (code === 'KeyQ') { shiftGearManual(-1); }
+        if (code === 'KeyM') { toggleMusicMute(); }
+        if (code === 'KeyB') { toggleBassBoost(); }
+        if (code === 'KeyV') { cycleTimeOfDay(); }
+        if (code === 'KeyC') { cycleCameraViewMode(); }
+        if (code === 'Digit1') { setCameraViewMode(0); }
+        if (code === 'Digit2') { setCameraViewMode(1); }
+        if (code === 'Digit3') { setCameraViewMode(2); }
+        if (code === 'KeyR') { state.laneOffset = -6.5; state.lateralVelocity = 0; }
+      });
+
+      window.addEventListener('keyup', (e) => {
+        const code = e.code;
+        if (code === 'KeyW' || code === 'ArrowUp') keys.up = false;
+        if (code === 'KeyS' || code === 'ArrowDown') keys.down = false;
+        if (code === 'KeyA' || code === 'ArrowLeft') { keys.left = false; state.leftIndicator = false; }
+        if (code === 'KeyD' || code === 'ArrowRight') { keys.right = false; state.rightIndicator = false; }
+        if (code === 'Space') state.handbrake = false;
+        if (code === 'KeyH') state.hornActive = false;
+        if (code === 'KeyL') triggerHighBeamDipper(false);
+      });
+
+      // Interactive Drag-to-Steer on the Steering Wheel itself
+      const steeringTouchZone = document.getElementById('steeringTouchZone');
+      let draggingWheel = false;
+      let dragStartX = 0;
+
+      steeringTouchZone.addEventListener('pointerdown', (e) => {
+        draggingWheel = true;
+        dragStartX = e.clientX;
+        steeringTouchZone.setPointerCapture(e.pointerId);
+        startEngineIfNeeded();
+      });
+      steeringTouchZone.addEventListener('pointermove', (e) => {
+        if (!draggingWheel) return;
+        const deltaX = e.clientX - dragStartX;
+        state.steerInput = Math.max(-1, Math.min(1, deltaX / 110));
+      });
+      steeringTouchZone.addEventListener('pointerup', () => {
+        draggingWheel = false;
+        state.steerInput = 0;
+      });
+
+      // On-Screen Touch / Mouse Buttons
+      function bindHoldButton(btnId, onDown, onUp) {
+        const el = document.getElementById(btnId);
+        if (!el) return;
+        el.addEventListener('pointerdown', (e) => { e.preventDefault(); startEngineIfNeeded(); onDown(); });
+        el.addEventListener('pointerup', onUp);
+        el.addEventListener('pointerleave', onUp);
+      }
+
+      bindHoldButton('btnGasPedal', () => { keys.up = true; }, () => { keys.up = false; });
+      bindHoldButton('btnBrakePedal', () => { keys.down = true; }, () => { keys.down = false; });
+      bindHoldButton('btnSteerLeft', () => { keys.left = true; }, () => { keys.left = false; });
+      bindHoldButton('btnSteerRight', () => { keys.right = true; }, () => { keys.right = false; });
+      bindHoldButton('btnHandbrake', () => { state.handbrake = true; }, () => { state.handbrake = false; });
+      bindHoldButton('btnHorn', () => { state.hornActive = true; triggerAIGiveWay(); }, () => { state.hornActive = false; });
+      bindHoldButton('btnDipper', () => { triggerHighBeamDipper(true); triggerAIGiveWay(); }, () => { triggerHighBeamDipper(false); });
+
+      document.getElementById('btnGearUp').addEventListener('click', () => shiftGearManual(1));
+      document.getElementById('btnGearDown').addEventListener('click', () => shiftGearManual(-1));
+      document.getElementById('btnResetCar').addEventListener('click', () => {
+        state.laneOffset = -6.5;
+        state.lateralVelocity = 0;
+        showHighwayToast('LANE ASSIST', 'Centered in Middle Cruise Lane');
+      });
+
+      // Seat Height / Road Horizon Pitch Slider & Camera View Mode Switcher
+      const seatPitchSlider = document.getElementById('seatPitchSlider');
+      if (seatPitchSlider) {
+        seatPitchSlider.addEventListener('input', (e) => {
+          state.seatPitchOffset = parseFloat(e.target.value) || 0;
+          updateDriverCameraProjection();
+        });
+      }
+
+      function setCameraViewMode(modeIndex) {
+        state.cameraViewMode = modeIndex % 3;
+        const rig = document.getElementById('cockpitRig');
+        const label = document.getElementById('camModeLabel');
+
+        if (state.cameraViewMode === 0) {
+          // 1: Driver Seat FPP Cockpit (crops empty bottom seat cushions so windshield & road are large)
+          rig.style.display = 'block';
+          rig.style.left = '-2.5%';
+          rig.style.top = '-1.0%';
+          rig.style.width = '105%';
+          rig.style.height = '118%';
+          if (label) label.textContent = '1: Driver Cockpit';
+          showHighwayToast('CAMERA VIEW: 1', 'RHD Driver Cockpit FPP View');
+        } else if (state.cameraViewMode === 1) {
+          // 2: Close Dash / Wide Windshield FPP (pushes lower dashboard down for an extra-wide windshield view)
+          rig.style.display = 'block';
+          rig.style.left = '-8%';
+          rig.style.top = '6%';
+          rig.style.width = '116%';
+          rig.style.height = '136%';
+          if (label) label.textContent = '2: Dash Close FPP';
+          showHighwayToast('CAMERA VIEW: 2', 'Wide Windshield / Dash Close FPP');
+        } else {
+          // 3: Bonnet / Hood Cam (Full unobstructed highway view)
+          rig.style.display = 'none';
+          if (label) label.textContent = '3: Bonnet Cam';
+          showHighwayToast('CAMERA VIEW: 3', 'Unobstructed Bonnet / Hood View');
+        }
+        updateDriverCameraProjection();
+      }
+
+      function cycleCameraViewMode() {
+        setCameraViewMode((state.cameraViewMode + 1) % 3);
+      }
+
+      const btnCycleCam = document.getElementById('btnCycleCam');
+      if (btnCycleCam) {
+        btnCycleCam.addEventListener('click', cycleCameraViewMode);
+      }
+
+      // Allow dragging on the windshield/highway canvas to look around or fine-tune road pitch
+      let lookingAround = false;
+      let lookStartX = 0;
+      let lookStartY = 0;
+      highwayCanvas.addEventListener('pointerdown', (e) => {
+        lookingAround = true;
+        lookStartX = e.clientX;
+        lookStartY = e.clientY;
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (!lookingAround) return;
+        const dx = (e.clientX - lookStartX) / window.innerWidth;
+        const dy = (e.clientY - lookStartY) / window.innerHeight;
+        state.lookYaw = Math.max(-0.35, Math.min(0.35, -dx * 0.8));
+        state.lookPitch = Math.max(-0.18, Math.min(0.18, -dy * 0.5));
+      });
+      window.addEventListener('pointerup', () => {
+        lookingAround = false;
+        state.lookYaw = 0;
+        state.lookPitch = 0;
+      });
+
+      // =======================================================================
+      // 9. SIMULATOR ACTIONS (Gear Shifting, Dipper, Horn Give-Way, Weather, Audio)
+      // =======================================================================
+      function shiftGearManual(dir) {
+        state.autoTransmission = false;
+        document.getElementById('screenGearMode').textContent = 'MODE: MANUAL';
+        state.gear = Math.max(-1, Math.min(5, state.gear + dir));
+        state.clutch = 1.0;
+        setTimeout(() => { state.clutch = 0; }, 220);
+      }
+
+      document.getElementById('screenGearMode').addEventListener('click', () => {
+        state.autoTransmission = !state.autoTransmission;
+        document.getElementById('screenGearMode').textContent = state.autoTransmission ? 'MODE: AUTO' : 'MODE: MANUAL';
+      });
+
+      function triggerHighBeamDipper(active) {
+        state.highBeam = active;
+        const overlay = document.getElementById('lightFlashOverlay');
+        const lamp = document.getElementById('highBeamLamp');
+        if (active) {
+          overlay.style.background = 'radial-gradient(circle at 50% 24%, rgba(186, 230, 253, 0.25), transparent 70%)';
+          overlay.style.opacity = '1';
+          lamp.className = 'text-sky-400 font-bold drop-shadow-[0_0_6px_#38bdf8]';
+          headlightSpot.intensity = 2.4;
+        } else {
+          overlay.style.opacity = '0';
+          lamp.className = 'text-slate-600 font-bold';
+          headlightSpot.intensity = state.timeOfDay === 'day' ? 0 : 1.4;
+        }
+      }
+
+      // If you honk (H) or flash High-Beam Dipper (L), slower cars ahead in your lane move left!
+      function triggerAIGiveWay() {
+        aiVehicles.forEach((v) => {
+          if (!v.isOncoming && v.mesh.position.z < 0 && v.mesh.position.z > -110) {
+            if (Math.abs(v.mesh.position.x - state.laneOffset) < 2.6 && v.laneIdx > 0) {
+              v.laneIdx--;
+              v.targetX = laneCentersLeft[v.laneIdx];
+              showHighwayToast('DIPPER / HORN PASS', 'Vehicle ahead giving way to Left Lane');
+            }
+          }
+        });
+      }
+
+      function toggleMusicMute() {
+        initAudioEngine();
+        state.musicMuted = !state.musicMuted;
+        if (carAudio.musicGain && carAudio.ctx) {
+          carAudio.musicGain.gain.setTargetAtTime(state.musicMuted ? 0 : 0.78, carAudio.ctx.currentTime, 0.05);
+        }
+        document.getElementById('btnToggleMusic').textContent = state.musicMuted ? 'Unmute (M)' : 'Mute (M)';
+        document.getElementById('musicStatusIcon').textContent = state.musicMuted ? '🔇' : '🔊';
+      }
+
+      function toggleBassBoost() {
+        initAudioEngine();
+        state.bassBoost = !state.bassBoost;
+        if (carAudio.bassFilter && carAudio.ctx) {
+          carAudio.bassFilter.gain.setTargetAtTime(state.bassBoost ? 11 : 2, carAudio.ctx.currentTime, 0.05);
+        }
+        const btn = document.getElementById('btnBassBoost');
+        btn.textContent = state.bassBoost ? '🔥 Bass Boost: ON (B)' : 'Bass Boost: OFF (B)';
+        btn.className = state.bassBoost
+          ? 'px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-300 border border-amber-400/50 transition'
+          : 'px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 border border-slate-600 transition';
+      }
+
+      function cycleTimeOfDay() {
+        const order = ['day', 'sunset', 'night'];
+        const nextIdx = (order.indexOf(state.timeOfDay) + 1) % order.length;
+        state.timeOfDay = order[nextIdx];
+
+        const btn = document.getElementById('btnWeatherMode');
+        const screenTime = document.getElementById('screenTimeMode');
+
+        if (state.timeOfDay === 'day') {
+          scene.background.setHex(0x7dd3fc);
+          scene.fog.color.setHex(0xbae6fd);
+          ambientLight.intensity = 0.78;
+          sunLight.intensity = 0.95;
+          sunLight.color.setHex(0xfffbeb);
+          headlightSpot.intensity = 0;
+          btn.textContent = '☀ Day (V)';
+          screenTime.textContent = '☀ DAY';
+        } else if (state.timeOfDay === 'sunset') {
+          scene.background.setHex(0xf97316);
+          scene.fog.color.setHex(0xfdba74);
+          ambientLight.intensity = 0.52;
+          sunLight.intensity = 0.8;
+          sunLight.color.setHex(0xfb923c);
+          headlightSpot.intensity = 1.1;
+          btn.textContent = '🌅 Sunset (V)';
+          screenTime.textContent = '🌅 DUSK';
+        } else {
+          scene.background.setHex(0x090d16);
+          scene.fog.color.setHex(0x090d16);
+          ambientLight.intensity = 0.22;
+          sunLight.intensity = 0.15;
+          headlightSpot.intensity = 2.0;
+          btn.textContent = '🌙 Night (V)';
+          screenTime.textContent = '🌙 NIGHT';
+        }
+      }
+
+      document.getElementById('btnToggleMusic').addEventListener('click', toggleMusicMute);
+      document.getElementById('screenMuteBtn').addEventListener('click', toggleMusicMute);
+      document.getElementById('btnBassBoost').addEventListener('click', toggleBassBoost);
+      document.getElementById('screenBassBtn').addEventListener('click', toggleBassBoost);
+      document.getElementById('btnWeatherMode').addEventListener('click', cycleTimeOfDay);
+      document.getElementById('screenTimeMode').addEventListener('click', cycleTimeOfDay);
+
+      // Toast Notification Helper
+      let toastTimeout = null;
+      function showHighwayToast(title, body) {
+        const toast = document.getElementById('highwayToast');
+        document.getElementById('toastTitle').textContent = title;
+        document.getElementById('toastBody').textContent = body;
+        toast.style.opacity = '1';
+        toast.style.transform = 'translate(-50%, 0)';
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translate(-50%, -8px)';
+        }, 2800);
+      }
+
+      function startEngineIfNeeded() {
+        if (!state.engineStarted) {
+          state.engineStarted = true;
+          document.getElementById('startModal').classList.add('hidden');
+        }
+        initAudioEngine();
+      }
+
+      document.getElementById('btnStartEngine').addEventListener('click', () => {
+        startEngineIfNeeded();
+        showHighwayToast('YAMUNA EXPRESSWAY', 'Engine Started • Looping Car Bass Active');
+      });
+
+      // =======================================================================
+      // 10. MAIN PHYSICS, AI TRAFFIC & MULTI-CAMERA ANIMATION LOOP
+      // =======================================================================
+      let lastTime = performance.now();
+      let worldScrollZ = 0;
+
+      function updatePhysicsAndWorld(dt) {
+        // 1. Throttle & Brake Inputs
+        state.throttle = keys.up ? Math.min(1, state.throttle + dt * 4.5) : Math.max(0, state.throttle - dt * 5.0);
+        state.brake = keys.down ? Math.min(1, state.brake + dt * 5.0) : Math.max(0, state.brake - dt * 5.0);
+
+        // 2. Steering Input & Smooth Return-to-Center
+        if (keys.left) {
+          state.steerInput = Math.max(-1, state.steerInput - dt * 3.2);
+        } else if (keys.right) {
+          state.steerInput = Math.min(1, state.steerInput + dt * 3.2);
+        } else if (!draggingWheel) {
+          state.steerInput *= Math.pow(0.015, dt);
+          if (Math.abs(state.steerInput) < 0.005) state.steerInput = 0;
+        }
+
+        // Visual Steering Wheel Angle (-380 deg to +380 deg)
+        const targetWheelDeg = state.steerInput * 360;
+        state.steerAngleDeg += (targetWheelDeg - state.steerAngleDeg) * Math.min(1, dt * 14);
+
+        // 3. Speed & Automatic/Manual 5-Speed Gearbox Physics
+        const gearTopSpeeds = { '-1': 35, '0': 0, '1': 42, '2': 78, '3': 115, '4': 148, '5': 185 };
+
+        if (state.autoTransmission) {
+          if (state.speedKmh < -1) state.gear = -1;
+          else if (state.speedKmh < 2 && state.throttle < 0.05 && state.brake < 0.05) state.gear = 1;
+          else if (state.speedKmh < 36) state.gear = 1;
+          else if (state.speedKmh < 68) state.gear = 2;
+          else if (state.speedKmh < 102) state.gear = 3;
+          else if (state.speedKmh < 138) state.gear = 4;
+          else state.gear = 5;
+        }
+
+        // Acceleration & Braking forces
+        if (state.handbrake) {
+          state.speedKmh *= Math.pow(0.12, dt);
+          if (Math.abs(state.speedKmh) < 0.8) state.speedKmh = 0;
+        } else if (state.throttle > 0.01) {
+          if (state.gear === -1) {
+            state.speedKmh = Math.min(state.maxSpeedKmh, state.speedKmh + state.throttle * 26 * dt);
+            if (state.speedKmh > 0 && state.autoTransmission) state.gear = 1;
+          } else if (state.gear > 0) {
+            const maxForGear = gearTopSpeeds[String(state.gear)] || 185;
+            const accelFactor = Math.max(0.18, 1 - (state.speedKmh / 195));
+            if (state.speedKmh < maxForGear) {
+              state.speedKmh += state.throttle * 34 * accelFactor * dt;
+            } else {
+              // Rev limiter bounce in manual mode
+              state.speedKmh -= 4 * dt;
+            }
+          }
+        }
+
+        if (state.brake > 0.01) {
+          if (state.speedKmh > 1) {
+            state.speedKmh = Math.max(0, state.speedKmh - state.brake * 58 * dt);
+          } else {
+            // Engage Reverse
+            state.gear = -1;
+            state.speedKmh = Math.max(-32, state.speedKmh - state.brake * 18 * dt);
+          }
+        }
+
+        // Natural Aerodynamic Drag & Rolling Resistance on Concrete
+        if (state.throttle < 0.02 && state.brake < 0.02) {
+          state.speedKmh *= Math.pow(0.86, dt);
+          if (Math.abs(state.speedKmh) < 0.3) state.speedKmh = 0;
+        }
+
+        // Compute realistic RPM for current gear
+        const absSpeed = Math.abs(state.speedKmh);
+        const gearMax = gearTopSpeeds[String(state.gear)] || 60;
+        const targetRpm = state.gear === 0
+          ? 850 + state.throttle * 5200
+          : Math.min(6700, 880 + (absSpeed / gearMax) * 5400 + state.throttle * 350);
+        state.rpm += (targetRpm - state.rpm) * Math.min(1, dt * 10);
+
+        // 4. Forward Motion & Lateral Steering along the 3-Lane Left Carriageway
+        const speedMetersPerSec = state.speedKmh / 3.6;
+        const steerSensitivity = Math.min(1, absSpeed / 18) * (1 - absSpeed / 320);
+        state.lateralVelocity = state.steerInput * 9.5 * steerSensitivity * (state.speedKmh >= 0 ? 1 : -1);
+        state.laneOffset += state.lateralVelocity * dt;
+
+        // Clamp within the Left Shoulder (-11.9) and Median Crash Barrier (-1.9)
+        if (state.laneOffset < -11.8) {
+          state.laneOffset = -11.8;
+          state.speedKmh *= 0.96; // Shoulder rumble strip friction
+        } else if (state.laneOffset > -2.0) {
+          state.laneOffset = -2.0;
+          state.speedKmh *= 0.96; // Median barrier rub
+        }
+
+        // Advance Distance along Yamuna Expressway (Greater Noida -> Agra)
+        state.distanceKm = Math.min(
+          state.totalExpresswayKm,
+          Math.max(0, state.distanceKm + (speedMetersPerSec * dt) / 1000)
+        );
+
+        // Scroll concrete road texture
+        worldScrollZ += speedMetersPerSec * dt;
+        roadTexture.offset.y = -worldScrollZ * 0.02;
+
+        // Scroll 3D Gantries, Median Shrubs, Solar Lights & Trees
+        worldProps.forEach((prop) => {
+          prop.mesh.position.z += speedMetersPerSec * dt;
+          if (prop.mesh.position.z > 25) {
+            prop.mesh.position.z -= prop.loopLength;
+            if (prop.mesh.userData) prop.mesh.userData.triggered = false;
+          }
+
+          // Speed Camera Gantry Radar Check (>100 km/h triggers strobe flash!)
+          if (
+            prop.mesh.userData &&
+            prop.mesh.userData.isRadar &&
+            !prop.mesh.userData.triggered &&
+            prop.mesh.position.z > -38 &&
+            prop.mesh.position.z < -15
+          ) {
+            prop.mesh.userData.triggered = true;
+            if (state.speedKmh > 102) {
+              triggerSpeedCameraFlash(Math.round(state.speedKmh));
+            } else {
+              showHighwayToast('YEIDA SPEED RADAR PASSED', `Your Speed: ${Math.round(state.speedKmh)} km/h (Within 100 km/h Limit ✓)`);
+            }
+          }
+        });
+
+        // 5. Update Dynamic AI Highway Traffic & Collision Avoidance
+        aiVehicles.forEach((v) => {
+          const vSpeedMs = v.speedKmh / 3.6;
+          if (v.isOncoming) {
+            // Oncoming traffic moves toward us (+Z)
+            v.mesh.position.z += (speedMetersPerSec + vSpeedMs) * dt;
+            if (v.mesh.position.z > 35) {
+              v.mesh.position.z = -580 - Math.random() * 90;
+            }
+          } else {
+            // Same-direction traffic moves relative to our speed
+            v.mesh.position.z += (speedMetersPerSec - vSpeedMs) * dt;
+            v.mesh.position.x += (v.targetX - v.mesh.position.x) * Math.min(1, dt * 3.5);
+
+            // Wrap around ahead or behind
+            if (v.mesh.position.z > 35) {
+              v.mesh.position.z = -550 - Math.random() * 80;
+              v.laneIdx = v.isTruck ? 0 : Math.floor(Math.random() * 3);
+              v.targetX = laneCentersLeft[v.laneIdx];
+            } else if (v.mesh.position.z < -620) {
+              v.mesh.position.z = -40;
+            }
+
+            // Soft bumper check if player gets too close behind an AI vehicle
+            if (
+              v.mesh.position.z > -7.5 &&
+              v.mesh.position.z < 2.5 &&
+              Math.abs(v.mesh.position.x - state.laneOffset) < 1.85
+            ) {
+              state.speedKmh = Math.min(state.speedKmh, v.speedKmh * 0.92);
+              v.mesh.position.z = -8.2;
+              showHighwayToast('AEB BRAKE ASSIST', 'Slow vehicle ahead! Steer Right (D) or Flash Dipper (L)');
+            }
+          }
+        });
+
+        // 6. Update Driver Camera & Cockpit G-Force / Sub-Bass Shake
+        driverCamera.position.x = state.laneOffset;
+        const roadVibration = Math.sin(worldScrollZ * 0.65) * Math.min(0.012, absSpeed * 0.00009);
+        const seatHeightBoost = state.seatPitchOffset * 0.025;
+        driverCamera.position.y = (state.cameraViewMode === 2 ? 1.05 : 1.32) + seatHeightBoost + roadVibration;
+
+        // Downward road pitch so the 6-lane Yamuna Expressway fills the windshield below the horizon
+        const baseRoadPitch = -0.14 - (state.seatPitchOffset * 0.0025);
+        driverCamera.rotation.order = 'YXZ';
+        driverCamera.rotation.y = state.lookYaw - (state.steerInput * 0.035);
+        driverCamera.rotation.x = baseRoadPitch + state.lookPitch + (state.throttle * 0.009) - (state.brake * 0.018);
+        driverCamera.rotation.z = -state.steerInput * 0.018;
+
+        headlightSpot.position.x = state.laneOffset;
+        headlightSpot.target.position.x = state.laneOffset + state.steerInput * 4;
+
+        // Rear-View Mirror Camera Position
+        rearCamera.position.set(state.laneOffset, 1.55, 2.0);
+        rearCamera.lookAt(state.laneOffset, 1.35, 120);
+
+        // Apply subtle G-force & Sub-Bass Cabin Pulse to `#cockpitRig`
+        const rig = document.getElementById('cockpitRig');
+        const bassPulseScale = 1 + state.bassEnergy * 0.009;
+        const swayX = -state.steerInput * 7;
+        const swayY = (state.brake * 5) - (state.throttle * 3) + Math.sin(performance.now() * 0.03) * (state.bassEnergy * 2.5);
+        rig.style.transform = `translate3d(${swayX.toFixed(2)}px, ${swayY.toFixed(2)}px, 0) scale(${bassPulseScale.toFixed(4)})`;
+      }
+
+      function triggerSpeedCameraFlash(recordedSpeed) {
+        const overlay = document.getElementById('lightFlashOverlay');
+        overlay.style.background = 'rgba(255, 255, 255, 0.72)';
+        overlay.style.opacity = '1';
+        setTimeout(() => { overlay.style.opacity = '0'; }, 130);
+        showHighwayToast(
+          `📸 SPEED CAMERA FLASH: ${recordedSpeed} KM/H!`,
+          'Yamuna Expressway Limit is 100 km/h • YEIDA e-Challan Alert'
+        );
+      }
+
+      // Update Digital Displays & HUD Telemetry
+      function updateHUD() {
+        const roundedSpeed = Math.abs(Math.round(state.speedKmh));
+        const gearStr = state.gear === 0 ? 'N' : (state.gear === -1 ? 'R' : (state.autoTransmission ? 'D' + state.gear : 'M' + state.gear));
+
+        document.getElementById('speedDigitsMID').textContent = roundedSpeed;
+        document.getElementById('hudSpeedText').textContent = roundedSpeed;
+        document.getElementById('gearBadgeMID').textContent = gearStr;
+        document.getElementById('hudGearText').textContent = gearStr;
+
+        const rpmPct = Math.min(100, Math.max(8, ((state.rpm - 700) / 6000) * 100));
+        document.getElementById('rpmBarMID').style.width = rpmPct + '%';
+
+        // Turn Indicators blink
+        const blinkOn = Math.floor(performance.now() / 320) % 2 === 0;
+        document.getElementById('leftTurnLamp').className = (state.leftIndicator && blinkOn) ? 'text-emerald-400 font-bold' : 'text-slate-600';
+        document.getElementById('rightTurnLamp').className = (state.rightIndicator && blinkOn) ? 'text-emerald-400 font-bold' : 'text-slate-600';
+
+        // Infotainment GPS Route Progress
+        const agraRem = Math.max(0, state.totalExpresswayKm - state.distanceKm);
+        document.getElementById('odoText').textContent = state.distanceKm.toFixed(1) + ' KM';
+        document.getElementById('hudDistanceRemaining').textContent = `(Agra: ${agraRem.toFixed(1)} km)`;
+        document.getElementById('routeProgressBar').style.width = ((state.distanceKm / state.totalExpresswayKm) * 100).toFixed(1) + '%';
+
+        // Find current/next milestone on Yamuna Expressway
+        let nextMs = milestones[milestones.length - 1];
+        for (let i = 0; i < milestones.length; i++) {
+          if (milestones[i].km >= state.distanceKm) {
+            nextMs = milestones[i];
+            break;
+          }
+        }
+        document.getElementById('nextMilestoneText').textContent = '↗ ' + nextMs.name.toUpperCase();
+        document.getElementById('hudLocationLabel').textContent = 'Next: ' + nextMs.name;
+      }
+
+      // Render Rear-View Mirror Reflection
+      const mirrorPixelBuf = new Uint8Array(320 * 90 * 4);
+      const mirrorImageData = rearMirrorCtx.createImageData(320, 90);
+
+      function renderRearViewMirror() {
+        renderer.setRenderTarget(rearRenderTarget);
+        renderer.render(scene, rearCamera);
+        renderer.readRenderTargetPixels(rearRenderTarget, 0, 0, 320, 90, mirrorPixelBuf);
+        renderer.setRenderTarget(null);
+
+        // Flip vertically (WebGL readPixels is bottom-up)
+        const rowBytes = 320 * 4;
+        for (let y = 0; y < 90; y++) {
+          const srcOffset = (89 - y) * rowBytes;
+          const dstOffset = y * rowBytes;
+          mirrorImageData.data.set(mirrorPixelBuf.subarray(srcOffset, srcOffset + rowBytes), dstOffset);
+        }
+        rearMirrorCtx.putImageData(mirrorImageData, 0, 0);
+      }
+
+      // Handle Browser Resize
+      window.addEventListener('resize', () => {
+        updateDriverCameraProjection();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      // Master Animation Loop
+      let frameCounter = 0;
+      function animate(now) {
+        requestAnimationFrame(animate);
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+        frameCounter++;
+
+        updatePhysicsAndWorld(dt);
+        updateAudioEngine();
+
+        // Render Main 3D Yamuna Expressway View
+        renderer.render(scene, driverCamera);
+
+        // Render Rear-View Mirror every 2nd frame for locked 60 FPS performance
+        if (frameCounter % 2 === 0) {
+          renderRearViewMirror();
+        }
+
+        // Render FPP Cockpit Overlay (`Original-6854-su-13.webp` + Rotating Wheel + Shifter + Pedals)
+        renderCockpitOverlay(dt);
+
+        // Update Digital Cluster & HUD
+        updateHUD();
+      }
+
+      window.onload = function () {
+        lastTime = performance.now();
+        animate(lastTime);
+      };
+    })();
+  </script>
+</body>
+</html>
