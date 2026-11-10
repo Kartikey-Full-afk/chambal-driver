@@ -1,6 +1,6 @@
 # chambal-driver - https://chambaldrive.netlify.app
 # ONLY FOR DESKTOP ( NOT OPTIMIZED FOR MOBILE PHONES )
-1. it is reccomended to load the cockpit image provided in repository
+# 1. it is reccomended to load the cockpit image provided in repository
 2. you can load any song of your choice
 3. set orange bar to max in top for better field of view 
 4. to load dashboard click on cockpit button
