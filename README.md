@@ -1,4 +1,4 @@
-# chambal-driver
+# chambal-driver - https://chambaldrive.netlify.app
 1. it is reccomended to load the cockpit image provided in repository
 2. you can load any song of your choice
 3. set orange bar to max in top
